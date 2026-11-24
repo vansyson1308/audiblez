@@ -26,7 +26,8 @@ from ebooklib import epub
 from tabulate import tabulate
 
 from audiblez import text as textmod
-from audiblez.audio import QAConfig, analyze_chunk, clean_chunk, level_chunks, silence
+from audiblez.audio import (QAConfig, RoomTone, analyze_chunk, clean_chunk, estimate_noise_floor, level_chunks,
+                            silence)
 from audiblez.normalize import Lexicon, normalize_text
 from audiblez.text import BREAK, HEADING, Section, blocks_to_text, chunk_paragraph, html_to_blocks
 
@@ -79,8 +80,10 @@ class Settings:
     normalize: bool = True
     lexicon: Optional[str] = None
     keep_stress: bool = False
+    stress: str = 'off'  # off | ruaccent (Russian: automatic stress marks + a model that follows them)
     announce_title: bool = True
     pause_scale: float = 1.0
+    room_tone: bool = True  # pauses filled with the background noise of the voice instead of digital silence
     # output
     formats: tuple = ('m4b',)
     loudness: float = -16.0
@@ -90,6 +93,8 @@ class Settings:
     keep_master: bool = False
     dry_run: bool = False
     chapters: Optional[str] = None  # e.g. "1-3,5"
+    time_limit: Optional[float] = None  # hours: stop synthesizing (cleanly, resumable) after this time
+    deadline: Optional[float] = None  # internal: time.time() at which synthesis stops (from time_limit)
 
 
 @dataclass
@@ -372,7 +377,8 @@ def resolve_engine_choice(settings: Settings, book_language):
             lang = language or book_language or 'en'
             # Qwen3-TTS (expressive, cloned narrator) when audiblez ships a narrator voice for the language,
             # Kokoro (fast) for its other languages
-            engine = 'qwen' if lang in DEFAULT_QWEN_VOICES or lang not in KOKORO_LANGUAGE_CODES else 'kokoro'
+            engine = 'qwen' if (lang in DEFAULT_QWEN_VOICES or lang not in KOKORO_LANGUAGE_CODES
+                                or not _kokoro_installed()) else 'kokoro'
     if engine == 'kokoro':
         voice = settings.voice
         if not voice:
@@ -403,6 +409,32 @@ def resolve_engine_choice(settings: Settings, book_language):
     return dict(engine='qwen', mode=mode, language=language, voice_profile=profile)
 
 
+def with_stress_model(settings: Settings, choice):
+    """--stress ruaccent: read with the Qwen3-TTS fine-tune that follows the stress marks (unless --qwen-model)."""
+    if (settings.stress == 'ruaccent' and not settings.qwen_model and choice.get('engine') == 'qwen'
+            and choice.get('language') == 'ru' and choice.get('mode') == 'clone'):
+        from audiblez.stress_ru import STRESS_MODEL
+        return dataclasses.replace(settings, qwen_model=STRESS_MODEL)
+    return settings
+
+
+def make_stressor(settings: Settings, choice, work_dir=None):
+    """Russian stress marks (--stress ruaccent), or None."""
+    if settings.stress in (None, '', 'off'):
+        return None
+    if settings.stress != 'ruaccent':
+        raise SystemExit(f'Unknown --stress mode "{settings.stress}" (expected off or ruaccent)')
+    if choice.get('language') != 'ru' or choice.get('engine') != 'qwen':
+        print('\033[93m--stress ruaccent only applies to Russian with Qwen3-TTS: ignored.\033[0m')
+        return None
+    from audiblez.stress_ru import STRESS_MODEL, Stressor
+    model = with_stress_model(settings, choice).qwen_model
+    if model != STRESS_MODEL:
+        print(f'\033[93mNote: {model or "the base model"} may not follow stress marks; {STRESS_MODEL} is the '
+              f'model trained to read them.\033[0m')
+    return Stressor(Path(work_dir) / 'stress_cache.json' if work_dir else None)
+
+
 def _voice_profile_for(choice, settings: Settings):
     from audiblez.engines import VoiceProfile, find_voice_profile
     if choice.get('mode') != 'clone':
@@ -427,10 +459,18 @@ def _load_factory(settings: Settings):
     return getattr(importlib.import_module(module), attr or 'create_engine')
 
 
+def _kokoro_installed():
+    import importlib.util
+    return importlib.util.find_spec('kokoro') is not None
+
+
 def create_engine(choice, settings: Settings):
     if settings.engine_factory:
         return _load_factory(settings)(choice, settings)
     if choice['engine'] == 'kokoro':
+        if not _kokoro_installed():
+            raise SystemExit('Kokoro is not installed (pip install kokoro; it needs Python 3.10-3.12). '
+                             'Use --engine qwen with a --voice-profile instead.')
         from audiblez.engines import KokoroEngine
         return KokoroEngine(choice['voice'], speed=settings.speed, device=settings.device)
     from audiblez.engines import QwenEngine
@@ -476,6 +516,37 @@ def make_verifier(engine, language, settings: Settings, log=print):
         return None
 
 
+def load_failed(cache_dir):
+    """
+    {key: entry} of the chunks whose latest take did not pass the quality checks, from qa_failed.jsonl (appended by
+    every run and every parallel worker). The most recent record of a chunk wins: a failure, or {"key", "ok": true}
+    written when a later take passed (e.g. with --retry-failed).
+    """
+    latest = {}
+    for path in sorted(Path(cache_dir).glob('qa_failed*.jsonl')):
+        for seq, line in enumerate(path.read_text(encoding='utf-8').splitlines()):
+            try:
+                entry = json.loads(line)
+            except Exception:
+                continue
+            key = entry.get('key')
+            if not key:
+                continue
+            rank = (float(entry.get('t', 0)), seq)
+            if key not in latest or rank >= latest[key][0]:
+                latest[key] = (rank, entry)
+    return {k: e for k, (_, e) in latest.items() if not e.get('ok')}
+
+
+def append_failed(path, entry):
+    with open(path, 'a', encoding='utf-8') as f:  # one short line per write: safe with parallel workers
+        f.write(json.dumps(dict(entry, t=round(time.time(), 3)), ensure_ascii=False) + '\n')
+
+
+def time_is_up(settings):
+    return bool(settings.deadline) and time.time() >= settings.deadline
+
+
 class CacheView:
     """Read access to the synthesis cache without loading a model."""
 
@@ -483,22 +554,31 @@ class CacheView:
         self.fingerprint = fingerprint
         fp_hash = hashlib.sha1(fingerprint.encode('utf-8')).hexdigest()[:12]
         self.cache_dir = Path(work_dir) / 'cache' / f'{engine_name}-{fp_hash}'
-        self.failed_keys = set()
-        failed = self.cache_dir / 'qa_failed.jsonl'
-        if failed.exists():
-            for line in failed.read_text(encoding='utf-8').splitlines():
-                try:
-                    self.failed_keys.add(json.loads(line)['key'])
-                except Exception:
-                    pass
+        self.failed = load_failed(self.cache_dir)
+        self.failed_keys = set(self.failed)
+
+    def report(self, labelled_texts):
+        """QA report entries of the given (chapter label, text) chunks whose latest take failed the checks."""
+        self.failed = load_failed(self.cache_dir)
+        out, seen = [], set()
+        for label, text in labelled_texts:
+            key = chunk_key(self.fingerprint, text)
+            if key in self.failed and key not in seen:
+                seen.add(key)
+                out.append(dict(self.failed[key], chapter=label))
+        return out
 
     def path(self, text):
         return self.cache_dir / f'{chunk_key(self.fingerprint, text)}.flac'
 
-    def is_cached(self, text, retry_failed=False):
-        if not self.path(text).exists():
+    def is_cached(self, text, retry_failed=False, since=None):
+        """With retry_failed, a failed chunk counts as missing unless it was regenerated after `since`."""
+        path = self.path(text)
+        if not path.exists():
             return False
-        return not (retry_failed and chunk_key(self.fingerprint, text) in self.failed_keys)
+        if retry_failed and chunk_key(self.fingerprint, text) in self.failed_keys:
+            return since is not None and path.stat().st_mtime >= since
+        return True
 
     def load(self, text):
         wav, _ = soundfile.read(str(self.path(text)), dtype='float32')
@@ -534,13 +614,7 @@ class Synthesizer:
         self.qa_cfg = QAConfig(max_retries=settings.max_retries if engine.stochastic else 0,
                                min_rate=0.4 * rate * speed, max_rate=2.0 * rate * speed)
         self.failed_file = self.cache_dir / 'qa_failed.jsonl'
-        self.failed_keys = set()
-        if self.failed_file.exists():
-            for line in self.failed_file.read_text(encoding='utf-8').splitlines():
-                try:
-                    self.failed_keys.add(json.loads(line)['key'])
-                except Exception:
-                    pass
+        self.failed_keys = set(load_failed(self.cache_dir))
         self.report = []  # chunks that never passed the quality checks
 
     def key(self, text):
@@ -574,13 +648,16 @@ class Synthesizer:
         return out
 
     def synthesize(self, texts, label=''):
-        """Synthesize (and cache) the given texts, skipping the ones already cached."""
+        """Synthesize (and cache) the given texts, skipping the ones already cached. False if stopped by --time-limit."""
         todo = self.missing(texts)
         bs = self.batch_size
         if bs > 1:  # similar lengths in a batch: short chunks do not wait for long ones
             todo.sort(key=len, reverse=True)
         for start in range(0, len(todo), bs):
+            if time_is_up(self.settings):
+                return False
             self._render_batch(todo[start:start + bs], label)
+        return True
 
     def render(self, segments: List[Segment], label=''):
         """Audio of every segment (synthesizing the missing ones)."""
@@ -633,10 +710,11 @@ class Synthesizer:
                 entry = dict(key=self.key(text), file=self.cache_path(text).name, chapter=label, text=text,
                              reasons=qa.reasons, transcript=qa.transcript)
                 self.report.append(entry)
-                with open(self.failed_file, 'a', encoding='utf-8') as f:
-                    f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+                append_failed(self.failed_file, entry)
+                self.failed_keys.add(self.key(text))
             elif self.key(text) in self.failed_keys:
                 self.failed_keys.discard(self.key(text))
+                append_failed(self.failed_file, dict(key=self.key(text), ok=True))  # a later take passed
             self._progress(len(text), cached=False)
 
     def evaluate(self, wav, text):
@@ -710,16 +788,18 @@ def cache_dir_for(work_dir, engine):
     return Path(work_dir) / 'cache' / f'{engine.name}-{fp_hash}'
 
 
-def assemble_chapter(segments: List[Segment], audios, sr, scale=1.0):
+def assemble_chapter(segments: List[Segment], audios, sr, scale=1.0, room_tone=None):
+    """Chunks and pauses of a chapter; pauses are digital silence, or `room_tone(seconds)` (see audio.RoomTone)."""
+    gap = room_tone or (lambda seconds: silence(seconds, sr))
     lead = PAUSES['chapter_lead'] * scale
-    parts, t, split_points = [silence(lead, sr)], lead, []
+    parts, t, split_points = [gap(lead)], lead, []
     for i, (seg, wav) in enumerate(zip(segments, audios)):
         parts.append(np.asarray(wav, dtype=np.float32))
         t += len(wav) / sr
         pause = seg.pause_after
         if i == len(segments) - 1:
             pause = max(pause, PAUSES['chapter_tail'] * scale)
-        parts.append(silence(pause, sr))
+        parts.append(gap(pause))
         if seg.para_end:
             split_points.append(t + pause / 2)
         t += pause
@@ -731,7 +811,7 @@ def assemble_chapter(segments: List[Segment], audios, sr, scale=1.0):
 # ---------------------------------------------------------------------------------------------------------------------
 
 def load_source(file_path):
-    """EPUB, .txt/.md file or folder -> title, author, language, cover bytes, documents (chapter sources)."""
+    """EPUB, FB2, DOCX, .txt/.md file or folder -> title, author, language, cover bytes, documents."""
     path = Path(file_path)
     if path.is_file() and path.suffix.lower() == '.epub':
         book, title, creator, language = read_book(path)
@@ -741,15 +821,22 @@ def load_source(file_path):
         docs = find_document_chapters_and_extract_texts(book, ruby='reading' if language == 'ja' else 'base')
         return SimpleNamespace(kind='epub', title=title, creator=creator, language=language,
                                cover=cover_item.get_content() if cover_item else b'', documents=docs)
+    from audiblez.formats import is_docx, is_fb2, read_docx, read_fb2
+    if path.is_file() and is_fb2(path):
+        return read_fb2(path)
+    if path.is_file() and is_docx(path):
+        return read_docx(path)
     from audiblez.textinput import TEXT_EXTENSIONS, read_text_book
     if path.is_dir() or (path.is_file() and path.suffix.lower() in TEXT_EXTENSIONS):
         meta, docs = read_text_book(path)
         cover = Path(meta['cover']).read_bytes() if meta.get('cover') else b''
         return SimpleNamespace(kind='text', title=meta['title'], creator=meta.get('author', ''),
-                               language=meta.get('language'), cover=cover, documents=docs)
+                               language=meta.get('language'), cover=cover, documents=docs,
+                               announce=not meta.get('title_from_file'))
     if not path.exists():
         raise SystemExit(f'File not found: {path}')
-    raise SystemExit(f'Unsupported input {path}: use an .epub, .txt or .md file, or a folder of .txt/.md files')
+    raise SystemExit(f'Unsupported input {path}: use an .epub, .fb2, .docx, .txt or .md file, or a folder of '
+                     f'.txt/.md files')
 
 
 def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.',
@@ -765,6 +852,8 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
     output_folder = Path(output_folder)
     output_folder.mkdir(parents=True, exist_ok=True)
     stem = file_path.stem if file_path.is_file() else file_path.name
+    if file_path.name.lower().endswith('.fb2.zip'):
+        stem = file_path.name[:-len('.fb2.zip')]
 
     source = load_source(file_path)
     title, creator, book_language, cover_image = source.title, source.creator, source.language, source.cover
@@ -772,14 +861,19 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
     if not selected_chapters:
         if pick_manually:
             selected_chapters = pick_chapters(document_chapters)
-        elif source.kind == 'text':
-            selected_chapters = list(document_chapters)  # the author's own files: read everything
+        elif source.kind in ('text', 'fb2'):
+            selected_chapters = list(document_chapters)  # own files, FB2 bodies: read everything
         else:
             selected_chapters = find_good_chapters(document_chapters)
     print_selected_chapters(document_chapters, selected_chapters)
 
     choice = resolve_engine_choice(settings, book_language)
     language = choice['language']
+    work_dir = output_folder / f'{stem}.audiblez'
+    work_dir.mkdir(parents=True, exist_ok=True)
+    stressor = make_stressor(settings, choice, work_dir)
+    if stressor is not None:  # marks of the e-book and of the lexicon are kept, RUAccent adds the others
+        settings = dataclasses.replace(with_stress_model(settings, choice), keep_stress=True)
     lexicon = Lexicon.load(settings.lexicon) if settings.lexicon else None
     if lexicon:
         print(f'Loaded {len(lexicon)} pronunciation rules from {settings.lexicon}')
@@ -791,7 +885,7 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
     chapters: List[PlannedChapter] = []
     for doc in selected_chapters:
         # EPUBs: merge tiny sections (title pages such as "Part One"); own texts: every heading is a chapter
-        min_chars = int(25 * profile['rate']) if source.kind == 'epub' else 1
+        min_chars = int(25 * profile['rate']) if source.kind in ('epub', 'fb2') else 1
         for section in document_sections(doc, min_chars=min_chars):
             segs = plan_section(section, language, max_chars, settings, lexicon)
             if not segs:
@@ -808,12 +902,18 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
             c.segments = c.segments[:max_sentences]
     if not chapters:
         raise SystemExit('No text to synthesize (no chapter selected or chapters are empty).')
-    if settings.announce_title and chapters[0].index == 1:
+    if settings.announce_title and chapters[0].index == 1 and getattr(source, 'announce', True):
         chapters[0].segments = intro_segments(title, creator, language, max_chars, settings, lexicon) + \
                                chapters[0].segments
 
-    work_dir = output_folder / f'{stem}.audiblez'
-    work_dir.mkdir(parents=True, exist_ok=True)
+    if stressor is not None:
+        t0 = time.time()
+        for c in chapters:
+            for seg in c.segments:
+                seg.text = stressor(seg.text)
+        stressor.save()
+        print(f'Stress marks placed by RUAccent ({time.time() - t0:.0f}s). Check them in script.txt; fix a word '
+              f'with a --lexicon rule such as "замок = замо́к".')
     all_texts = [(c.title, s.text) for c in chapters for s in c.segments]
     total_chars = sum(len(t) for _, t in all_texts)
     est_hours = sum(textmod.count_letters(t) for _, t in all_texts) / profile['rate'] / 3600 / settings.speed
@@ -837,14 +937,19 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
     engine_name, fingerprint = engine_fingerprint(choice, settings)
     cache = CacheView(work_dir, engine_name, fingerprint)
 
+    # with --retry-failed, failed chunks written after this are done (2 s margin: coarse file system clocks)
+    t_start = time.time() - 2
+
     def missing_jobs():
         jobs, seen = {}, set()
         for label, t in all_texts:
-            if t not in seen and not cache.is_cached(t, settings.retry_failed):
+            if t not in seen and not cache.is_cached(t, settings.retry_failed, since=t_start):
                 seen.add(t)
                 jobs.setdefault(label, []).append(t)
         return jobs
 
+    if settings.time_limit:
+        settings = dataclasses.replace(settings, deadline=time.time() + settings.time_limit * 3600)
     jobs = missing_jobs()
     missing_chars = sum(len(t) for texts in jobs.values() for t in texts)
     stats = new_stats(total_chars)
@@ -878,9 +983,16 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
         synth = Synthesizer(engine, work_dir, settings, stats, verifier=verifier, post_event=post_event,
                             language=language)
         for label, texts in jobs.items():
-            synth.synthesize(texts, label)
+            if not synth.synthesize(texts, label):
+                break
         report += synth.report
     still = missing_jobs()
+    report = cache.report(all_texts)  # every chunk of the book whose latest take failed, this run or before
+    if still and time_is_up(settings):
+        write_qa_report(work_dir / 'qa_report.txt', report)
+        print(f'\033[93mTime limit reached: {sum(len(v) for v in still.values())} chunks are still to synthesize. '
+              f'Run the same command again to continue (everything done so far is in the cache).\033[0m')
+        return dict(chapters=chapters, files=[], work_dir=work_dir, qa_failures=report, incomplete=True)
     if still:
         raise SystemExit(f'{sum(len(v) for v in still.values())} chunks could not be synthesized (see the errors '
                          f'above). Run the same command again to resume.')
@@ -895,7 +1007,9 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
         if post_event:
             post_event('CORE_CHAPTER_STARTED', chapter_index=c.source_index)
         audios = level_chunks([cache.load(s.text) for s in c.segments], sr)
-        wav, split_points = assemble_chapter(c.segments, audios, sr, settings.pause_scale)
+        tone_db = estimate_noise_floor(audios, sr) if settings.room_tone else None
+        tone = RoomTone(tone_db, sr, seed=c.index) if tone_db is not None else None
+        wav, split_points = assemble_chapter(c.segments, audios, sr, settings.pause_scale, room_tone=tone)
         path = chapters_dir / f'chapter_{c.index:03d}.wav'
         soundfile.write(str(path), wav, sr, subtype='PCM_16')
         chapter_audio.append(ChapterAudio(c.title, path, len(wav) / sr, split_points))
@@ -971,7 +1085,10 @@ def preview_audio(text, voice=None, speed=1.0, settings=None, language=None):
     """Synthesize a short text (GUI preview). Returns (float32 audio, sample_rate)."""
     settings = settings or Settings(voice=voice, speed=speed, language=language)
     choice = resolve_engine_choice(settings, language)
-    key = (json.dumps(choice, sort_keys=True), settings.speed, settings.device, settings.speaker, settings.instruct)
+    stressor = make_stressor(settings, choice)
+    settings = with_stress_model(settings, choice)
+    key = (json.dumps(choice, sort_keys=True), settings.speed, settings.device, settings.speaker, settings.instruct,
+           settings.qwen_model)
     engine = _PREVIEW_ENGINES.get(key)
     if engine is None:
         _PREVIEW_ENGINES.clear()  # keep a single model in memory
@@ -980,8 +1097,10 @@ def preview_audio(text, voice=None, speed=1.0, settings=None, language=None):
     max_chars = settings.max_chunk_chars or (QwenEngine if choice['engine'] == 'qwen' else KokoroEngine).default_max_chars
     segments = []
     for block in textmod.text_to_blocks(text):
-        t = normalize_text(block.text, choice['language'], is_heading=block.kind == HEADING)
-        segments += [Segment(c.text, PAUSES['sentence']) for c in chunk_paragraph(t, choice['language'], max_chars)]
+        t = normalize_text(block.text, choice['language'], is_heading=block.kind == HEADING,
+                           keep_stress=stressor is not None)
+        segments += [Segment(stressor(c.text) if stressor else c.text, PAUSES['sentence'])
+                     for c in chunk_paragraph(t, choice['language'], max_chars)]
     audios = [clean_chunk(w, engine.sample_rate) for w in engine.synthesize([s.text for s in segments])] if segments else []
     wav, _ = assemble_chapter(segments, audios, engine.sample_rate) if segments else (np.zeros(0, np.float32), [])
     return wav, engine.sample_rate

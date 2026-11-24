@@ -196,6 +196,8 @@ def markdown_to_blocks(text, ruby_mode='reading'):
             flush()
             continue
         line = re.sub(r'^\s{0,3}>\s?', '', line)  # blockquote
+        # "- Привет, - сказала она." is a line of dialogue typed with a hyphen, not a list item: keep it as a dash
+        line = re.sub(r'^\s*[-–]\s+(?=[«"„“]?[А-ЯЁ])', '— ', line)
         line = re.sub(r'^\s*(?:[-*+]|\d+[.)])\s+', '', line)  # list items
         para.append(line)
     flush()
@@ -261,6 +263,25 @@ def _first_heading(blocks):
     return next((b.text for b in blocks if b.kind == HEADING), None)
 
 
+def _title_line(text, doc):
+    """
+    The first line of a plain-text story when it looks like its title: short, no sentence punctuation, followed by a
+    blank line, and more text after it ("Брак на спор", "星を継ぐ者"). Removes it from the document.
+    """
+    lines = text.lstrip('\ufeff').splitlines()
+    i = next((k for k, line in enumerate(lines) if line.strip()), None)
+    if i is None or i + 1 >= len(lines) or lines[i + 1].strip() or not doc.blocks or len(doc.blocks) < 2:
+        return None
+    first = doc.blocks[0]
+    t = first.text.strip()
+    if (first.kind != PARA or not t or len(t) > 90 or re.search(r'[.!?…:;,。！？」』]$', t) or is_chapter_heading_text(t)
+            or t[0] in '—–-«"„“「『' or clean_inline_text(lines[i]) != first.text):
+        return None
+    doc.blocks.remove(first)
+    doc.__post_init__()
+    return t
+
+
 def read_text_book(path):
     """
     Read a .txt/.md file or a folder of them.
@@ -306,6 +327,11 @@ def read_text_book(path):
             title = h1[0].text
             docs[0].blocks.remove(h1[0])  # the title is announced separately
             docs[0].__post_init__()
+    if not title and len(files) == 1 and docs and files[0].suffix.lower() not in ('.md', '.markdown'):
+        title = _title_line(texts[files[0]], docs[0])
+        if title and docs[0].toc_title == files[0].stem:
+            docs[0].toc_title = title
+    title_from_file = not title  # a file name is a fine metadata title, but it is not read aloud
     title = title or (path.name if path.is_dir() else path.stem)
     cover = meta.get('cover')
     cover_path = None
@@ -316,4 +342,5 @@ def read_text_book(path):
             if (base_dir / name).is_file():
                 cover_path = base_dir / name
                 break
-    return dict(title=title, author=meta.get('author', ''), language=language, cover=cover_path), docs
+    return dict(title=title, author=meta.get('author', ''), language=language, cover=cover_path,
+                title_from_file=title_from_file), docs

@@ -257,7 +257,24 @@ def load_qwen_model(model_id, device='auto', dtype='auto'):
         has_flash = importlib.util.find_spec('flash_attn') is not None
         kwargs['attn_implementation'] = 'flash_attention_2' if has_flash else 'sdpa'
     print(f'Loading {model_id} on {device} ({str(torch_dtype).replace("torch.", "")})...')
-    return Qwen3TTSModel.from_pretrained(model_id, **kwargs)
+    model = Qwen3TTSModel.from_pretrained(model_id, **kwargs)
+    keep_codec_fp32(model, torch_dtype)
+    return model
+
+
+def keep_codec_fp32(model, torch_dtype):
+    """
+    Run the speech codec (codes -> waveform decoder, and the reference encoder) in float32 when the language model
+    runs in half precision: its SnakeBeta activations can overflow in bf16/fp16 and produce silent or noisy audio
+    (vLLM-Omni hit this with voice cloning), and it is a small part of the total time.
+    `model` is a qwen_tts Qwen3TTSModel.
+    """
+    import torch
+    if torch_dtype == torch.float32:
+        return
+    codec = getattr(getattr(getattr(model, 'model', None), 'speech_tokenizer', None), 'model', None)
+    if codec is not None and hasattr(codec, 'float'):
+        codec.float()
 
 
 def load_reference_audio(path, target_sr=24000):
@@ -300,7 +317,9 @@ def load_faster_model(model_id, device, dtype):
     attn = 'flash_attention_2' if importlib.util.find_spec('flash_attn') is not None else 'sdpa'
     print(f'Loading {model_id} with faster-qwen3-tts (CUDA graphs) on {device} '
           f'({str(torch_dtype).replace("torch.", "")})...')
-    return FasterQwen3TTS.from_pretrained(model_id, device=device, dtype=torch_dtype, attn_implementation=attn)
+    fast = FasterQwen3TTS.from_pretrained(model_id, device=device, dtype=torch_dtype, attn_implementation=attn)
+    keep_codec_fp32(fast.model, torch_dtype)
+    return fast
 
 
 class QwenEngine(Engine):

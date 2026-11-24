@@ -68,7 +68,7 @@ def _worker(wid, device, n_workers, choice, settings, work_dir, language, task_q
         return
     while True:
         item = task_q.get()
-        if item is None:
+        if item is None or (settings.deadline and time.time() >= settings.deadline):  # --time-limit reached
             break
         label, texts = item
         before = len(synth.report)

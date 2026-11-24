@@ -28,7 +28,8 @@ def build_parser():
     parser = argparse.ArgumentParser(prog='audiblez', epilog=EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter,
                                      description='Generate audiobooks from e-books (epub to m4b / YouTube mp4).')
     parser.add_argument('epub_file_path', metavar='BOOK',
-                        help='An .epub, a .txt / .md file, or a folder of .txt / .md files (one per chapter)')
+                        help='An .epub / .fb2 / .docx, a .txt / .md file, or a folder of .txt / .md files '
+                             '(one per chapter)')
     parser.add_argument('-o', '--output', default='.', help='Output folder for the audiobook and temporary files',
                         metavar='FOLDER')
     parser.add_argument('-p', '--pick', default=False, action='store_true',
@@ -69,6 +70,8 @@ def build_parser():
     g.add_argument('--backend', choices=['auto', 'qwen-tts', 'faster'], default='auto',
                    help='Qwen3-TTS backend: faster = CUDA graphs (pip install faster-qwen3-tts); auto uses it when '
                         'installed on a CUDA GPU and falls back to qwen-tts on any error')
+    g.add_argument('--time-limit', type=float, metavar='HOURS',
+                   help='Stop synthesizing after this many hours, cleanly (run again to continue), e.g. 11.5 on Kaggle')
     g.add_argument('--gpus', default='auto',
                    help='Parallel workers: auto (one per GPU when there are 2+, e.g. Kaggle 2xT4), off, or "0,1"')
 
@@ -76,10 +79,17 @@ def build_parser():
     g.add_argument('--lexicon', metavar='FILE', help='Pronunciation dictionary: lines "word = replacement"')
     g.add_argument('--no-normalize', action='store_true', help='Do not normalize numbers/abbreviations/ё')
     g.add_argument('--keep-stress-marks', action='store_true', help='Keep combining stress marks (U+0301)')
+    g.add_argument('--stress', choices=['off', 'ruaccent'], default='off',
+                   help='Russian: mark the stressed vowel of every word with RUAccent (homographs, names, ё) and read '
+                        'with a Qwen3-TTS fine-tune that follows the marks (siriusfreak/qwen3-tts-12hz-1.7b-ru-'
+                        'stress-cf unless --qwen-model is given). pip install "audiblez[stress]"')
     g.add_argument('--no-title', action='store_true', help='Do not read the book title and author at the start')
     g.add_argument('--max-chunk-chars', type=int, help='Maximum characters per synthesized chunk (default: 300 for '
                                                        'Qwen3-TTS, 400 for Kokoro)')
     g.add_argument('--pause-scale', type=float, default=1.0, help='Multiply all pauses (e.g. 1.2 for a calmer pace)')
+    g.add_argument('--no-room-tone', action='store_true',
+                   help='Digital silence in the pauses (default: the soft background noise of the voice, like a real '
+                        'recording, so that the background does not switch off between sentences)')
 
     g = parser.add_argument_group('quality control')
     g.add_argument('--no-qa', action='store_true', help='Disable automatic checks and retries')
@@ -114,11 +124,13 @@ def settings_from_args(args):
         ref_audio=args.ref_audio, ref_text=args.ref_text, speaker=args.speaker, instruct=args.instruct,
         x_vector_only=args.x_vector_only, temperature=args.temperature, top_p=args.top_p, top_k=args.top_k,
         repetition_penalty=args.repetition_penalty, seed=args.seed, batch_size=args.batch_size,
-        backend=args.backend, gpus=args.gpus,
+        backend=args.backend, gpus=args.gpus, time_limit=args.time_limit,
         max_chunk_chars=args.max_chunk_chars, qa=not args.no_qa, asr=args.asr, asr_model=args.asr_model,
         max_retries=args.max_retries, retry_failed=args.retry_failed, normalize=not args.no_normalize,
-        lexicon=args.lexicon, keep_stress=args.keep_stress_marks, announce_title=not args.no_title,
-        pause_scale=args.pause_scale, formats=formats, loudness=args.loudness, episode_hours=args.episode_hours,
+        lexicon=args.lexicon, keep_stress=args.keep_stress_marks, stress=args.stress,
+        announce_title=not args.no_title,
+        pause_scale=args.pause_scale, room_tone=not args.no_room_tone, formats=formats, loudness=args.loudness,
+        episode_hours=args.episode_hours,
         cover=args.cover, keep_master=args.keep_master, dry_run=args.dry_run, chapters=args.chapters)
 
 
