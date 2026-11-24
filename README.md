@@ -63,6 +63,8 @@ What happens between the text and the audio file matters as much as the voice:
   session ends. With half precision (bf16/fp16) the speech codec stays in float32 (no silent or noisy takes).
 - **Mastering and YouTube**: -16 LUFS / -1.5 dBTP with a linear gain and peak limiter, `.m4b` with chapters and cover,
   `--youtube` for a 1080p `.mp4` and the chapter timestamps of the description, `--episode-hours 2` for ~2-hour parts.
+  `--slides slides.txt` changes the picture of the video at chosen paragraphs (`image.jpg | text where it starts`),
+  with crossfades; cues are checked with `--dry-run`.
 
 ![Audiblez GUI on MacOSX](./imgs/mac.png)
 

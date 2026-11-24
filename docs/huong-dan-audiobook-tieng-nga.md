@@ -102,7 +102,11 @@ Lỗi dễ nghe thấy nhất của TTS tiếng Nga là **đặt sai trọng âm
 Thử trên bộ 24 câu có từ đồng hình (за́мок/замо́к, му́ки/муки́, бе́лки/белки́, доро́гой/дорого́й…), RUAccent đặt đúng cả 24
 khi mỗi câu có một từ đồng hình. Lưu ý:
 
-- RUAccent vẫn sai khoảng 2–3% số từ (số của tác giả model): sửa bằng `--lexicon` khi nghe thấy.
+- RUAccent vẫn sai khoảng 2–3% số từ (số của tác giả model): sửa bằng `--lexicon` khi nghe thấy. Trên truyện đầu
+  tiên (707 từ đồng hình) em đã rà tay từng từ: những lỗi lặp lại (по́няла → поняла́, у двери́ → у две́ри, руки́ →
+  ру́ки, по-моему́…) được audiblez tự sửa; phần đoán chữ ё cho từ đồng hình của RUAccent (лет → лёт, села → сёла,
+  небо → нёбо) đã bị tắt vì sai cả 16/16 lần. Lỗi riêng của từng truyện (tên riêng, một từ đồng hình trong câu
+  lạ) ghi vào `tu_dien.txt`, vd. `Замок был старый = Замо́к был старый`, `re:\bШуман(а|у|ом|е)?\b = Шу́ман\1`.
 - **Model card cảnh báo**: một phần câu dùng để huấn luyện lấy từ bộ dữ liệu `biggest-ru-book` không khai báo giấy
   phép; tác giả khuyên kiểm tra trước khi dùng thương mại. Trọng số model là Apache-2.0.
 - Hãy nghe so sánh một chương có và không có `--stress ruaccent` trước khi làm cả loạt.
@@ -179,6 +183,30 @@ Kết quả:
 | `truyen.m4b` | Bản audiobook có chương (nghe kiểm tra trên điện thoại) |
 | `truyen.audiblez/script.txt` | Văn bản thực sự được đọc |
 | `truyen.audiblez/qa_report.txt` | Những câu không qua kiểm tra tự động (kể cả từ các lần chạy trước) — nên nghe lại |
+
+## 7b. Nhiều ảnh trong video (`--slides`)
+
+Thay vì một ảnh tĩnh suốt 2 giờ, video có thể đổi ảnh **đúng cảnh của truyện**, chuyển cảnh mờ dần 2,5 giây. Tạo file
+`slides.txt` cạnh các ảnh, mỗi dòng một ảnh, kèm (tuỳ chọn) đoạn chữ đầu của đoạn văn mà ảnh bắt đầu xuất hiện:
+
+```
+# ảnh             | đoạn văn bắt đầu bằng (hoặc chứa) câu này
+naberezhnaya.jpg
+bufet.jpg         | Здесь всё дышало Галиной Ивановной
+pismo.jpg         | Льняная ткань распалась
+naberezhnaya.jpg  | Утром дождь наконец кончился
+```
+
+```bash
+audiblez truyen.txt --youtube --slides slides.txt --dry-run     # kiểm tra: in ra mỗi ảnh bắt đầu từ câu nào
+```
+
+- Ảnh đầu luôn hiện từ 0:00; dòng không có câu mốc thì được đặt ở giữa hai ảnh kề nó.
+- Câu mốc so khớp không phân biệt hoa/thường, е/ё, dấu câu, dấu trọng âm; phải theo đúng thứ tự trong truyện. Câu
+  không tìm thấy sẽ **báo lỗi ngay khi `--dry-run`**, trước khi tốn GPU.
+- Ảnh 16:9 (vd. 1344×756, 1920×1080) phủ kín màn hình; ảnh tỉ lệ khác được đặt trên nền mờ của chính nó.
+- Cũng có thể đưa cả thư mục ảnh: `--slides thu_muc_anh/` (chia đều theo thời lượng, theo thứ tự tên file).
+- Mã hoá nhanh: video 10 phút với 3 ảnh mất khoảng 1 phút trên CPU 4 nhân (5 khung hình/giây, ảnh giải mã một lần).
 
 ## 8. Chạy miễn phí trên Kaggle (2 × T4)
 
