@@ -118,6 +118,43 @@ def clean_chunk(wav, sr):
     return fade_edges(wav, sr)
 
 
+def active_level_db(wav, sr):
+    """Average level (dBFS) of the voiced parts of a clip, or None for silence/very short clips."""
+    db, _ = _frame_db(np.asarray(wav, dtype=np.float32), sr)
+    if len(db) == 0:
+        return None
+    voiced = db[db > _silence_threshold_db(db)]
+    if len(voiced) < 10:
+        return None
+    return float(10 * np.log10(np.mean(10 ** (voiced / 10))))
+
+
+def level_chunks(audios, sr, deadband=1.5, strength=0.6, max_gain=4.0):
+    """
+    Gentle sentence-to-sentence leveling, like a narrator riding the fader: chunks within ±deadband dB of the
+    chapter median are untouched (natural expression is kept), larger deviations are reduced by `strength`
+    (capped at ±max_gain dB). An exclamation stays louder than the narration, but no longer jumps out.
+    """
+    levels = [active_level_db(a, sr) if len(a) else None for a in audios]
+    known = [lv for lv in levels if lv is not None]
+    if len(known) < 3:
+        return list(audios)
+    ref = float(np.median(known))
+    out = []
+    for a, lv in zip(audios, levels):
+        if lv is None or abs(lv - ref) <= deadband:
+            out.append(a)
+            continue
+        excess = (lv - ref) - np.sign(lv - ref) * deadband
+        gain_db = float(np.clip(-excess * strength, -max_gain, max_gain))
+        b = np.asarray(a, dtype=np.float32) * np.float32(10 ** (gain_db / 20))
+        peak = float(np.max(np.abs(b))) if len(b) else 0.0
+        if peak > 0.98:
+            b *= np.float32(0.98 / peak)
+        out.append(b)
+    return out
+
+
 def silence(seconds, sr):
     return np.zeros(int(round(max(0.0, seconds) * sr)), dtype=np.float32)
 

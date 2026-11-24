@@ -9,8 +9,8 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from audiblez.audio import (QAConfig, analyze_chunk, char_error_rate, clean_chunk, limit_internal_silences,
-                            trim_silence)
+from audiblez.audio import (QAConfig, active_level_db, analyze_chunk, char_error_rate, clean_chunk, level_chunks,
+                            limit_internal_silences, trim_silence)
 from audiblez.export import (ChapterAudio, OutputOptions, export_audiobook, format_timestamp, plan_episodes,
                              write_ffmetadata, youtube_chapters_text)
 
@@ -57,6 +57,17 @@ class AudioTest(unittest.TestCase):
         self.assertFalse(analyze_chunk(tone(3.5), SR, text, qa, hit_token_limit=True).ok)
         self.assertTrue(analyze_chunk(tone(0.6), SR, '— Как?', qa).ok)
         self.assertFalse(analyze_chunk(tone(6.0), SR, '— Как?', qa).ok)
+
+    def test_level_chunks(self):
+        chunks = [tone(1.0, amp=0.1), tone(1.0, amp=0.11), tone(1.0, amp=0.095), tone(1.0, amp=0.2), tone(1.0, amp=0.05)]
+        levels = [active_level_db(c, SR) for c in chunks]
+        out = [active_level_db(c, SR) for c in level_chunks(chunks, SR)]
+        ref = sorted(levels)[2]
+        self.assertAlmostEqual(out[0], levels[0], places=3)  # within the deadband: untouched
+        self.assertAlmostEqual(out[1], levels[1], places=3)
+        self.assertLess(out[3], levels[3])  # +6 dB exclamation reduced...
+        self.assertGreater(out[3], ref + 1.5)  # ...but still louder than the narration
+        self.assertGreater(out[4], levels[4])  # quiet chunk raised
 
     def test_cer(self):
         self.assertEqual(char_error_rate('Всё ещё идёт!', 'все еще идет'), 0.0)

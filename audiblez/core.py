@@ -24,7 +24,7 @@ from ebooklib import epub
 from tabulate import tabulate
 
 from audiblez import text as textmod
-from audiblez.audio import QAConfig, analyze_chunk, clean_chunk, silence
+from audiblez.audio import QAConfig, analyze_chunk, clean_chunk, level_chunks, silence
 from audiblez.normalize import Lexicon, normalize_text
 from audiblez.text import BREAK, HEADING, Section, blocks_to_text, chunk_paragraph, html_to_blocks
 
@@ -665,7 +665,7 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
             post_event('CORE_CHAPTER_STARTED', chapter_index=c.source_index)
         print(f'\n--- Chapter {c.index}: {c.title} ({len(c.segments)} chunks) ---')
         t0 = time.time()
-        audios = synth.render(c.segments, label=c.title)
+        audios = level_chunks(synth.render(c.segments, label=c.title), sr)
         wav, split_points = assemble_chapter(c.segments, audios, sr, settings.pause_scale)
         path = chapters_dir / f'chapter_{c.index:03d}.wav'
         soundfile.write(str(path), wav, sr, subtype='PCM_16')
