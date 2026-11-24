@@ -831,7 +831,8 @@ def load_source(file_path):
         meta, docs = read_text_book(path)
         cover = Path(meta['cover']).read_bytes() if meta.get('cover') else b''
         return SimpleNamespace(kind='text', title=meta['title'], creator=meta.get('author', ''),
-                               language=meta.get('language'), cover=cover, documents=docs)
+                               language=meta.get('language'), cover=cover, documents=docs,
+                               announce=not meta.get('title_from_file'))
     if not path.exists():
         raise SystemExit(f'File not found: {path}')
     raise SystemExit(f'Unsupported input {path}: use an .epub, .fb2, .docx, .txt or .md file, or a folder of '
@@ -901,7 +902,7 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
             c.segments = c.segments[:max_sentences]
     if not chapters:
         raise SystemExit('No text to synthesize (no chapter selected or chapters are empty).')
-    if settings.announce_title and chapters[0].index == 1:
+    if settings.announce_title and chapters[0].index == 1 and getattr(source, 'announce', True):
         chapters[0].segments = intro_segments(title, creator, language, max_chars, settings, lexicon) + \
                                chapters[0].segments
 

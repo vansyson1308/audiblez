@@ -110,6 +110,27 @@ class FormatsTest(unittest.TestCase):
         texts = [s.text for c in res['chapters'] for s in c.segments]
         self.assertIn('— Ты кто такая? — спросила она.', texts)
 
+    def test_txt_title_line_and_file_name_never_read(self):
+        story = self.tmp / '2026-11-25_story.txt'
+        story.write_text('ОН НЕ ОЖИДАЛ, ЧТО ПОЛЮБИТ СВОЮ ЖЕНУ\n\nТатьяна стояла у окна.\n- Ты опять задержался?\n',
+                         encoding='utf-8')
+        src = core.load_source(story)
+        self.assertEqual((src.title, src.announce), ('ОН НЕ ОЖИДАЛ, ЧТО ПОЛЮБИТ СВОЮ ЖЕНУ', True))
+        res = core.main(story, output_folder=self.tmp / 'out', settings=core.Settings(dry_run=True))
+        texts = [s.text for s in res['chapters'][0].segments]
+        self.assertEqual(texts[0], 'Он не ожидал, что полюбит свою жену.')  # announced once, as words
+        self.assertEqual(texts[1], 'Татьяна стояла у окна.')
+        self.assertEqual(res['chapters'][0].title, 'ОН НЕ ОЖИДАЛ, ЧТО ПОЛЮБИТ СВОЮ ЖЕНУ')
+        # no title line: the file name is only metadata, it is not read aloud
+        story.write_text('Татьяна стояла у окна.\n\nПотом она ушла.\n', encoding='utf-8')
+        src = core.load_source(story)
+        self.assertEqual((src.title, src.announce), ('2026-11-25_story', False))
+        res = core.main(story, output_folder=self.tmp / 'out', settings=core.Settings(dry_run=True))
+        self.assertEqual(res['chapters'][0].segments[0].text, 'Татьяна стояла у окна.')
+        ja = self.tmp / 'hoshi.txt'
+        ja.write_text('星を継ぐ者\n\n彼は空を見上げた。\n', encoding='utf-8')
+        self.assertEqual(core.load_source(ja).title, '星を継ぐ者')
+
     def test_markdown_dialogue_is_not_a_list(self):
         blocks = markdown_to_blocks('- Ты кто такая? - спросила она.\n\n- пункт списка\n\n- Item\n')
         self.assertEqual([b.text for b in blocks], ['— Ты кто такая? - спросила она.', 'пункт списка', 'Item'])

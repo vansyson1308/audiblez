@@ -25,7 +25,8 @@ What happens between the text and the audio file matters as much as the voice:
 - **Clean text**: EPUBs in reading order without footnote markers, notes, tables of contents or copyright pages;
   books stored as a single file are split into their real chapters. Your own `.txt`/`.md` files are read with their
   chapter headings (`# Title`, `第1話`, `第一章`, `제1장`, `1화`, `Глава 5`, `Chapter 3`…), scene breaks (`◇◇◇`,
-  `* * *`, `---`) and an optional front matter (`title:`, `author:`, `language:`, `cover:`). Shift_JIS, EUC-KR, GB18030
+  `* * *`, `---`) and an optional front matter (`title:`, `author:`, `language:`, `cover:`); a short first line
+  followed by a blank line is the title of a `.txt` story (a file name is never read aloud). Shift_JIS, EUC-KR, GB18030
   and cp1251 files are detected automatically.
 - **Japanese**: furigana written like on 小説家になろう / カクヨム / 青空文庫 (`｜颯《はやて》`, `魔王城《まおうじょう》`,
   `東京（とうきょう）`) and EPUB `<ruby>` are **read with their reading** — the reliable way to get names and rare kanji

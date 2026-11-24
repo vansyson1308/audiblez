@@ -240,6 +240,7 @@ def read_docx(path):
         else:
             out.append(f'<p>{content}</p>')
     blocks = html_to_blocks('<html><body>' + ''.join(out) + '</body></html>')
+    announce = bool(doc_title or title)  # never read the file name aloud
     title = doc_title or title or path.stem
     return SimpleNamespace(kind='text', title=title, creator='', language=detect_language(blocks_to_text(blocks)),
-                           cover=b'', documents=[_document(path.name, blocks)] if blocks else [])
+                           cover=b'', documents=[_document(path.name, blocks)] if blocks else [], announce=announce)

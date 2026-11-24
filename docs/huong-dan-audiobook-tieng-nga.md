@@ -57,8 +57,9 @@ audiblez đọc trực tiếp:
   author: По ту сторону правды
   ---
   ```
-  hoặc dòng `# Tiêu đề` duy nhất của file `.md`; không có thì lấy tên file. Ảnh `cover.jpg` cạnh file truyện được dùng
-  làm ảnh video.
+  hoặc dòng `# Tiêu đề` duy nhất của file `.md`, hoặc **dòng đầu của file `.txt`** nếu nó ngắn, không có dấu kết câu
+  và theo sau là một dòng trống (`ОН НЕ ОЖИДАЛ, ЧТО ПОЛЮБИТ СВОЮ ЖЕНУ`). Không có tiêu đề thì tên file chỉ dùng làm
+  metadata, **không bao giờ được đọc to**. Ảnh `cover.jpg` cạnh file truyện được dùng làm ảnh video.
 - **Một thư mục** chứa nhiều `.txt`/`.md`: mỗi file là một chương (theo thứ tự tự nhiên: 2 trước 10).
 - **`.docx`** (Word, Google Docs → Tải xuống → .docx): style *Title* = tiêu đề, *Heading 1/2* = chương.
 - **`.fb2`, `.fb2.zip`** (định dạng ebook phổ biến nhất ở Nga) và **`.epub`**: tiêu đề, tác giả, bìa, chương, bỏ chú thích.
