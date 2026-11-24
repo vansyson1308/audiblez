@@ -941,7 +941,7 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
             where = ('from 0:00' if sl.chapter is None and sl is slides[0] else
                      f'from chapter {chapters[sl.chapter].index}: '
                      f'"{chapters[sl.chapter].segments[sl.segment].text[:60]}…"'
-                     if sl.chapter is not None else 'halfway between its neighbours')
+                     if sl.chapter is not None else 'evenly between the cued slides around it')
             print(f'  {sl.image.name:24s} {where}')
     all_texts = [(c.title, s.text) for c in chapters for s in c.segments]
     total_chars = sum(len(t) for _, t in all_texts)

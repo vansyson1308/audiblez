@@ -10,9 +10,10 @@ Several pictures in the YouTube video, each shown from a chosen moment of the st
     2.jpg                   | Внутри лежала плотная, ровная пачка
     3.jpg                   | Утром дождь наконец кончился
 
-Image paths are relative to the text file. The first slide starts at 0:00; a slide without a cue is placed halfway
-between its neighbours. Cues are matched against the text that is read (case, ё/е, stress marks and punctuation are
-ignored), in order, and checked when the book is planned (also with --dry-run), before anything is synthesized.
+Image paths are relative to the text file. The first slide starts at 0:00; slides without a cue are spaced evenly
+between the cued slides (or the end) around them. Cues are matched against the text that is read (case, ё/е, stress
+marks and punctuation are ignored), in order, and checked when the book is planned (also with --dry-run), before
+anything is synthesized.
 
 The video is rendered at a low frame rate (still pictures) from images decoded once, so a 2-hour episode takes a few
 minutes to encode: see encode_slideshow.
