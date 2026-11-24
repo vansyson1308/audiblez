@@ -239,7 +239,11 @@ def list_bundled_voices():
 def load_qwen_model(model_id, device='auto', dtype='auto'):
     import logging
     logging.getLogger('sox').setLevel(logging.ERROR)  # the optional SoX binary is not used by audiblez
-    from qwen_tts import Qwen3TTSModel
+    try:
+        from qwen_tts import Qwen3TTSModel
+    except ImportError as e:
+        raise SystemExit('Qwen3-TTS is not installed. Install it with:  pip install "audiblez[qwen,asr]"  '
+                         '(or "audiblez[fast,asr]" on an NVIDIA GPU)') from e
     try:
         import transformers
         transformers.logging.set_verbosity_error()  # silences the per-sentence "Setting pad_token_id" notice
@@ -272,6 +276,33 @@ def load_reference_audio(path, target_sr=24000):
     return np.asarray(audio, dtype=np.float32), sr
 
 
+def qwen_fingerprint(model_id, mode, language, speaker=None, instruct='', x_vector_only=False, gen_kwargs=None,
+                     voice_profile=None):
+    """Identity of the generated audio (used as cache key). Computable without loading the model."""
+    parts = dict(model=model_id, mode=mode, lang=(language or '')[:2].lower(), speaker=speaker, instruct=instruct or '',
+                 xvec=bool(x_vector_only), gen=sorted((gen_kwargs or {}).items()))
+    if voice_profile is not None:
+        parts['ref'] = file_sha1(voice_profile.audio_path)
+        parts['ref_text'] = voice_profile.text
+    return 'qwen|' + json.dumps(parts, sort_keys=True, ensure_ascii=False)
+
+
+def faster_backend_available():
+    import importlib.util
+    return importlib.util.find_spec('faster_qwen3_tts') is not None
+
+
+def load_faster_model(model_id, device, dtype):
+    """CUDA-graph accelerated Qwen3-TTS (github.com/andimarafioti/faster-qwen3-tts)."""
+    from faster_qwen3_tts import FasterQwen3TTS
+    import importlib.util
+    torch_dtype = resolve_dtype(dtype, device)
+    attn = 'flash_attention_2' if importlib.util.find_spec('flash_attn') is not None else 'sdpa'
+    print(f'Loading {model_id} with faster-qwen3-tts (CUDA graphs) on {device} '
+          f'({str(torch_dtype).replace("torch.", "")})...')
+    return FasterQwen3TTS.from_pretrained(model_id, device=device, dtype=torch_dtype, attn_implementation=attn)
+
+
 class QwenEngine(Engine):
     name = 'qwen'
     stochastic = True
@@ -279,7 +310,7 @@ class QwenEngine(Engine):
 
     def __init__(self, mode='clone', language='ru', model_id=None, device='auto', dtype='auto', voice_profile=None,
                  speaker=None, instruct=None, x_vector_only=False, temperature=None, top_p=None, top_k=None,
-                 repetition_penalty=None, model=None):
+                 repetition_penalty=None, model=None, backend='auto'):
         if mode not in QWEN_DEFAULT_MODELS:
             raise ValueError(f'Unknown Qwen mode {mode}, expected one of {list(QWEN_DEFAULT_MODELS)}')
         self.mode = mode
@@ -302,8 +333,24 @@ class QwenEngine(Engine):
         if mode == 'design' and not self.instruct:
             raise ValueError('Qwen voice-design mode needs an --instruct voice description')
         self.device = resolve_device(device) if model is None else str(getattr(model, 'device', 'cpu'))
-        self.model = model or load_qwen_model(self.model_id, self.device, dtype)
+        self.fast = None
+        if model is None and backend in ('auto', 'faster') and self.device.startswith('cuda'):
+            if faster_backend_available():
+                try:
+                    self.fast = load_faster_model(self.model_id, self.device, dtype)
+                except Exception as e:
+                    if backend == 'faster':
+                        raise
+                    print(f'\033[93mfaster-qwen3-tts could not be loaded ({e}); using the standard backend.\033[0m')
+            elif backend == 'faster':
+                raise RuntimeError('--backend faster needs: pip install faster-qwen3-tts (see the README)')
+        elif backend == 'faster' and model is None:
+            raise RuntimeError('--backend faster needs a CUDA GPU')
+        self.model = self.fast.model if self.fast is not None else (model or load_qwen_model(self.model_id, self.device,
+                                                                                               dtype))
+        self.supports_batch = self.fast is None  # the CUDA-graph path generates one stream at a time
         self.prompt = None
+        self._ref_embedding = None
         if mode == 'clone':
             ref_audio, ref_sr = load_reference_audio(voice_profile.audio_path)
             duration = len(ref_audio) / ref_sr
@@ -312,25 +359,38 @@ class QwenEngine(Engine):
                       f'6-15 seconds of clean speech; long references increase the failure rate.\033[0m')
             self.prompt = self.model.create_voice_clone_prompt(
                 ref_audio=(ref_audio, ref_sr), ref_text=voice_profile.text, x_vector_only_mode=x_vector_only)
+            try:
+                self._ref_embedding = self.prompt[0].ref_spk_embedding
+            except Exception:
+                self._ref_embedding = None
+
+    @property
+    def backend(self):
+        return 'faster-qwen3-tts' if self.fast is not None else 'qwen-tts'
 
     def fingerprint(self):
-        parts = dict(model=self.model_id, mode=self.mode, lang=self.language, speaker=self.speaker,
-                     instruct=self.instruct, xvec=self.x_vector_only, gen=sorted(self.gen_kwargs.items()))
-        if self.voice_profile is not None:
-            parts['ref'] = file_sha1(self.voice_profile.audio_path)
-            parts['ref_text'] = self.voice_profile.text
-        return 'qwen|' + json.dumps(parts, sort_keys=True, ensure_ascii=False)
+        return qwen_fingerprint(self.model_id, self.mode, self.language, self.speaker, self.instruct,
+                                self.x_vector_only, self.gen_kwargs, self.voice_profile)
 
-    @staticmethod
-    def token_budget(text):
+    def token_budget(self, text):
         """Upper bound of codec tokens for a text: generous for slow dramatic reading, but stops runaway loops."""
-        from audiblez.text import count_letters
-        seconds = count_letters(text) / 5.0 + 5.0
+        from audiblez.text import count_letters, language_profile
+        slowest = 0.4 * language_profile(self.language)['rate']  # letters per second of a very slow reading
+        seconds = count_letters(text) / slowest + 5.0
         return int(min(2048, max(96, seconds * QWEN_FRAME_RATE)))
 
     def synthesize(self, texts, seed=0):
         texts = list(texts)
         seed_everything(seed)
+        if self.fast is not None:
+            try:
+                return self._synthesize_fast(texts)
+            except Exception as e:  # never lose a long job because of the accelerated path
+                print(f'\033[93mfaster-qwen3-tts failed ({type(e).__name__}: {e}); switching to the standard '
+                      f'backend for the rest of the run.\033[0m')
+                self.fast = None
+                self.supports_batch = True
+                seed_everything(seed)
         kwargs = dict(self.gen_kwargs, max_new_tokens=max(self.token_budget(t) for t in texts))
         languages = [self.qwen_language] * len(texts)
         if self.mode == 'clone':
@@ -342,11 +402,46 @@ class QwenEngine(Engine):
         else:
             wavs, sr = self.model.generate_voice_design(text=texts, language=languages, instruct=self.instruct,
                                                         **kwargs)
+        return self._to_output(wavs, sr)
+
+    def _synthesize_fast(self, texts):
+        out = []
+        for text in texts:
+            kwargs = dict(self.gen_kwargs, max_new_tokens=self.token_budget(text))
+            if self.mode == 'clone':
+                audio, sr = self.fast.generate_voice_clone(text=text, language=self.qwen_language,
+                                                           ref_text=self.voice_profile.text,
+                                                           voice_clone_prompt=self.prompt, **kwargs)
+            elif self.mode == 'custom':
+                audio, sr = self.fast.generate_custom_voice(text=text, speaker=self.speaker,
+                                                            language=self.qwen_language,
+                                                            instruct=self.instruct or None, **kwargs)
+            else:
+                audio, sr = self.fast.generate_voice_design(text=text, instruct=self.instruct,
+                                                            language=self.qwen_language, **kwargs)
+            parts = [np.asarray(a.detach().float().cpu().numpy() if hasattr(a, 'detach') else a,
+                                dtype=np.float32).reshape(-1) for a in (audio if isinstance(audio, (list, tuple))
+                                                                         else [audio])]
+            out.append(self._to_output([np.concatenate(parts) if parts else np.zeros(0, np.float32)], sr)[0])
+        return out
+
+    def _to_output(self, wavs, sr):
         if sr != self.sample_rate:
             import librosa
             wavs = [librosa.resample(np.asarray(w, dtype=np.float32), orig_sr=sr, target_sr=self.sample_rate)
                     for w in wavs]
         return [np.asarray(w, dtype=np.float32).reshape(-1) for w in wavs]
+
+    def speaker_similarity(self, wav):
+        """Cosine similarity between the take and the reference narrator, with the model's own speaker encoder."""
+        if self._ref_embedding is None or len(wav) < self.sample_rate // 2:
+            return None
+        import torch
+        model = self.model.model
+        with torch.no_grad():
+            emb = model.extract_speaker_embedding(audio=np.ascontiguousarray(wav, dtype=np.float32), sr=24000)
+            ref = self._ref_embedding.to(emb.device)
+            return float(torch.nn.functional.cosine_similarity(emb.flatten().float(), ref.flatten().float(), dim=0))
 
     def hit_token_limit(self, wav, text):
         """True if the generation was most likely cut by max_new_tokens (runaway / looping output)."""
@@ -355,4 +450,4 @@ class QwenEngine(Engine):
     def describe(self):
         who = {'clone': f'cloned voice {getattr(self.voice_profile, "path", None) or self.voice_profile.audio_path}',
                'custom': f'speaker {self.speaker}', 'design': f'designed voice "{self.instruct}"'}[self.mode]
-        return f'{self.model_id} ({self.qwen_language}), {who}'
+        return f'{self.model_id} ({self.qwen_language}, {self.backend} on {self.device}), {who}'

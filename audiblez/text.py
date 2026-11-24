@@ -71,7 +71,7 @@ _MARKER_RE = re.compile(r'^\s*[\[(]?\s*(?:\d{1,4}|[*†‡§¶]{1,4}|[ivxlc]{1,6
 LINE_BREAK = ' '  # internal marker for <br>
 _INVISIBLE_RE = re.compile('[­​‌‍‎‏⁠﻿᠎]')
 _SPACES_RE = re.compile(r'[ \t\r\n\f\v   -   　]+')
-_SCENE_BREAK_RE = re.compile(r'^[\s*•·⁂~_=#◆◇■□●○✱✲✳❖※—–\-.]+$')
+_SCENE_BREAK_RE = re.compile(r'^[\s*•·⁂~_=#◆◇■□●○✱✲✳❖※—–\-.＊☆★◎〇◯♢♦◈▼▽△▲]+$')
 
 _ROMAN_RE = r'(?=[MDCLXVI])M{0,3}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})'
 _ORDINAL_WORDS = (
@@ -92,6 +92,13 @@ _CHAPTER_HEADING_RE = re.compile(
     rf'^\s*(?:{_NUMBERED_WORDS}\.?\s+{_HEADING_NUM}|{_HEADING_NUM}|{_STANDALONE_WORDS})'
     r'\s*\.?(?:\s*[.:—–\-]\s*\S.{0,79})?\s*$',
     re.IGNORECASE)
+_CJK_NUM = r'[0-9０-９一二三四五六七八九十百千〇零两兩壱弐参]'
+_CJK_HEADING_RE = re.compile(
+    rf'^\s*(?:第\s*{_CJK_NUM}+\s*[章話话部節节回幕巻卷篇集編]|{_CJK_NUM}+\s*[章話话]|'
+    r'プロローグ|エピローグ|序章|終章|终章|幕間|閑話|番外編|番外篇|後日談|あとがき|まえがき|序幕|終幕|間章|'
+    r'제\s*[0-9]+\s*[장화부편권막]|[0-9]+\s*[화장]|프롤로그|에필로그|외전|서장|종장|막간|후기|작가의 말|'
+    r'序言|楔子|尾声|尾聲|后记|後記)'
+    r'(?:[\s：:.．\-—–・「『（(]+.{0,60})?\s*$')
 # Cyrillic letters often typed instead of Latin ones in Roman numerals (e.g. "ХII" with a Cyrillic "Х")
 _ROMAN_LOOKALIKES = str.maketrans({'Х': 'X', 'х': 'x', 'І': 'I', 'і': 'i', 'С': 'C', 'с': 'c', 'М': 'M', 'м': 'm',
                                    'Ⅰ': 'I', 'Ⅴ': 'V', 'Ⅹ': 'X'})
@@ -160,8 +167,12 @@ def _split_double_breaks(text: str) -> List[str]:
     return [p for p in parts if p.strip()]
 
 
-def html_to_blocks(html) -> List[Block]:
-    """Convert an (X)HTML document to an ordered list of Blocks."""
+def html_to_blocks(html, ruby='base') -> List[Block]:
+    """
+    Convert an (X)HTML document to an ordered list of Blocks.
+    ruby='base' reads the annotated text (漢字), ruby='reading' reads the furigana (かんじ): better for Japanese,
+    where authors add furigana precisely for names and unusual readings that a TTS would get wrong.
+    """
     if isinstance(html, bytes):
         html = html.decode('utf-8', errors='replace')
     with warnings.catch_warnings():
@@ -177,7 +188,7 @@ def html_to_blocks(html) -> List[Block]:
         for part in _split_double_breaks(raw):
             text = clean_inline_text(part)
             if not text or not re.search(r'\w', text):
-                if text and _SCENE_BREAK_RE.match(text) and re.search(r'[*•·⁂~#◆◇■□●○✱✲✳❖※]|[—–\-]{3}', text):
+                if text and _SCENE_BREAK_RE.match(text) and re.search(r'[*•·⁂~#◆◇■□●○✱✲✳❖※＊☆★◎〇◯♢♦◈▼▽△▲]|[—–\-]{3}', text):
                     _add_break(blocks)
                 continue
             if kind == HEADING:
@@ -200,6 +211,11 @@ def html_to_blocks(html) -> List[Block]:
             if name == 'br':
                 buf.append(LINE_BREAK)
                 continue
+            if name == 'ruby' and ruby == 'reading':
+                reading = ''.join(rt.get_text() for rt in child.find_all('rt')).strip()
+                if reading:
+                    buf.append(reading)
+                    continue
             if name == 'hr':
                 flush(kind, level)
                 _add_break(blocks)
@@ -240,7 +256,7 @@ def is_chapter_heading_text(text: str) -> bool:
     t = text.strip()
     if not 0 < len(t) <= 100:
         return False
-    if _CHAPTER_HEADING_RE.match(t):
+    if _CHAPTER_HEADING_RE.match(t) or _CJK_HEADING_RE.match(t):
         return True
     words = t.split()
     if words and len(words) <= 2:  # "Глава ХII" with Cyrillic lookalikes
@@ -330,7 +346,8 @@ def split_sections(blocks: List[Block], default_title: Optional[str] = None, min
             if current.title is None:
                 current.title = b.text
             elif all(x.kind == HEADING for x in current.blocks) and current.title.count('. ') < 1:
-                current.title = f'{current.title}. {b.text}'  # "Часть первая" + "Глава 1"
+                sep = '　' if re.search(r'[\u3040-\u30ff\u4e00-\u9fff]', b.text) else '. '
+                current.title = f'{current.title}{sep}{b.text}'  # "Часть первая" + "Глава 1"
         current.blocks.append(b)
     if current.blocks:
         sections.append(current)
@@ -341,7 +358,8 @@ def split_sections(blocks: List[Block], default_title: Optional[str] = None, min
     for s in sections:
         if carry is not None:
             titles = [t for t in (carry.title, s.title) if t]
-            s = Section(title='. '.join(titles) if titles else None, blocks=carry.blocks + s.blocks)
+            sep = '　' if any(re.search(r'[\u3040-\u30ff\u4e00-\u9fff]', t) for t in titles) else '. '
+            s = Section(title=sep.join(titles) if titles else None, blocks=carry.blocks + s.blocks)
             carry = None
         body = sum(len(b.text) for b in s.blocks if b.kind != HEADING)
         if body < min_chars:
@@ -378,7 +396,7 @@ _ABBREVIATIONS = {
     'de': {'hr', 'fr', 'dr', 'prof', 'bzw', 'ca', 'usw', 'z.b', 'd.h', 'u.a', 'vgl', 'nr', 's'},
 }
 _SINGLE_LETTER_WORDS = {'ru': set('яаиоу'), 'en': {'a', 'i'}}
-_CJK_LANGS = ('zh', 'ja', 'ko')
+_CJK_LANGS = ('zh', 'ja')  # scripts written without spaces (Korean uses spaces and Western punctuation)
 
 _BOUNDARY_RE = re.compile(
     r'([.!?…]+|\.{3})'                    # terminal punctuation
@@ -405,6 +423,10 @@ def split_sentences(text: str, lang: str = 'en') -> List[str]:
         for i, p in enumerate(parts):
             cur += p
             if i % 2 == 1:
+                nxt = parts[i + 1] if i + 1 < len(parts) else ''
+                # 「……。」と言った / 「……？」って: the quotation continues the sentence
+                if re.search(r'[」』”"’）)]$', p) and re.match(r'\s*[とっ]', nxt):
+                    continue
                 sentences.append(cur.strip())
                 cur = ''
         if cur.strip():
@@ -429,7 +451,8 @@ def split_sentences(text: str, lang: str = 'en') -> List[str]:
                 continue
         # The next sentence must start with an uppercase letter or a digit ("Сурин? — спросил хозяин" goes on)
         nxt = re.match(r'[\s«"“„(\[—–\-]*(.)', text[m.end(3):])
-        if nxt and nxt.group(1).isalpha() and not nxt.group(1).isupper():
+        ch = nxt.group(1) if nxt else ''
+        if ch.isalpha() and ch.lower() != ch.upper() and not ch.isupper():  # only scripts with letter case
             continue
         end = m.end(2)
         sentence = text[start:end].strip()
@@ -448,24 +471,32 @@ _SPLIT_CLASSES = [
     re.compile(r',\s+'),
     re.compile(r'\s+'),
 ]
+# Japanese / Chinese: no spaces; split after a closing quote, then after 、，；： (never inside a word)
+_CJK_SPLIT_CLASSES = [
+    re.compile(r'[」』）)](?![、。！？!?…」』])'),
+    re.compile(r'[；：;:]'),
+    re.compile(r'[、，,]'),
+    re.compile(r'[…]+'),
+]
 
 
-def split_long_text(text: str, max_chars: int) -> List[str]:
+def split_long_text(text: str, max_chars: int, lang: str = 'en') -> List[str]:
     """Split a sentence longer than max_chars at the most natural point (; : — , then whitespace)."""
     text = text.strip()
     if len(text) <= max_chars:
         return [text]
     n = len(text)
     lo, hi = int(n * 0.2), int(n * 0.8)
-    for pattern in _SPLIT_CLASSES:
+    classes = _CJK_SPLIT_CLASSES if (lang or 'en')[:2] in _CJK_LANGS else _SPLIT_CLASSES
+    for pattern in classes:
         candidates = [m.end() for m in pattern.finditer(text) if lo <= m.end() <= hi]
         if candidates:
             pos = min(candidates, key=lambda p: abs(p - n / 2))
             left, right = text[:pos].strip(), text[pos:].strip()
             if left and right:
-                return split_long_text(left, max_chars) + split_long_text(right, max_chars)
-    # No whitespace at all in the central part (very unusual): hard split
-    return [text[:max_chars]] + split_long_text(text[max_chars:], max_chars)
+                return split_long_text(left, max_chars, lang) + split_long_text(right, max_chars, lang)
+    # No natural boundary at all in the central part (very unusual): hard split
+    return [text[:max_chars]] + split_long_text(text[max_chars:], max_chars, lang)
 
 
 @dataclass
@@ -477,17 +508,57 @@ class Chunk:
 def chunk_paragraph(text: str, lang: str, max_chars: int) -> List[Chunk]:
     """Pack the sentences of a paragraph into chunks of at most max_chars characters (never crossing paragraphs)."""
     pieces: List[Chunk] = []
+    joiner = '' if (lang or 'en')[:2] in _CJK_LANGS else ' '  # Japanese/Chinese are written without spaces
     for sentence in split_sentences(text, lang):
-        parts = split_long_text(sentence, max_chars)
+        parts = split_long_text(sentence, max_chars, lang)
         for i, p in enumerate(parts):
             pieces.append(Chunk(p, sentence_end=(i == len(parts) - 1)))
     chunks: List[Chunk] = []
     for piece in pieces:
-        if chunks and chunks[-1].sentence_end and len(chunks[-1].text) + 1 + len(piece.text) <= max_chars:
-            chunks[-1] = Chunk(chunks[-1].text + ' ' + piece.text, piece.sentence_end)
+        if chunks and chunks[-1].sentence_end and len(chunks[-1].text) + len(joiner) + len(piece.text) <= max_chars:
+            chunks[-1] = Chunk(chunks[-1].text + joiner + piece.text, piece.sentence_end)
         else:
             chunks.append(piece)
     return chunks
+
+
+# Typical narration speed in letters (str.isalnum characters) per second, and the chunk size that keeps a
+# chunk around 15-20 s of speech: long enough for natural prosody, short enough for an autoregressive TTS
+# to stay reliable. Japanese/Chinese characters are denser than alphabetic letters.
+LANGUAGE_PROFILES = {
+    'ru': dict(rate=12.0, max_chars=300, kokoro_max_chars=400),
+    'en': dict(rate=14.0, max_chars=300, kokoro_max_chars=400),
+    'ja': dict(rate=5.5, max_chars=110, kokoro_max_chars=150),
+    'ko': dict(rate=5.0, max_chars=130, kokoro_max_chars=180),
+    'zh': dict(rate=4.5, max_chars=90, kokoro_max_chars=130),
+}
+_DEFAULT_PROFILE = dict(rate=13.0, max_chars=300, kokoro_max_chars=400)
+
+
+def language_profile(lang):
+    return LANGUAGE_PROFILES.get((lang or 'en')[:2].lower(), _DEFAULT_PROFILE)
+
+
+def detect_language(text: str) -> str:
+    """Guess the language of a text from its script: ja, ko, zh, ru or en."""
+    sample = text[:50000]
+    counts = dict(
+        kana=len(re.findall(r'[\u3040-\u30ff\u31f0-\u31ff]', sample)),
+        hangul=len(re.findall(r'[\uac00-\ud7af\u1100-\u11ff\u3130-\u318f]', sample)),
+        han=len(re.findall(r'[\u4e00-\u9fff\u3400-\u4dbf]', sample)),
+        cyrillic=len(re.findall(r'[\u0400-\u04ff]', sample)),
+        latin=len(re.findall(r'[A-Za-z\u00c0-\u024f]', sample)),
+    )
+    total = sum(counts.values()) or 1
+    if counts['hangul'] / total > 0.2:
+        return 'ko'
+    if counts['kana'] / total > 0.05:
+        return 'ja'
+    if counts['han'] / total > 0.3:
+        return 'zh'
+    if counts['cyrillic'] / total > 0.3:
+        return 'ru'
+    return 'en'
 
 
 def count_letters(text: str) -> int:

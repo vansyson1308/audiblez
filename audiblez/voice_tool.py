@@ -40,6 +40,32 @@ PRESETS = {
                   'pauses, clear diction, no foreign accent.'),
         text=('Тишина стояла такая, что было слышно, как тикают часы в соседней комнате. — Ты правда думаешь, что '
               'он вернётся? — спросила она едва слышно. Я ничего не ответил: за окном уже светало.')),
+    'ja_male_narrator': dict(
+        language='ja',
+        instruct=('A deep, warm male voice, about 40 years old, native Japanese speaker with standard Tokyo '
+                  'pronunciation. Professional audiobook narrator (rōdoku): expressive, natural intonation, clear '
+                  'diction, natural conversational pace, not slow.'),
+        text='静かな夜だった。「本当に、彼は帰ってくると思う？」彼女は小さな声で尋ねた。僕は何も答えられなかった。'),
+    'ja_female_narrator': dict(
+        language='ja',
+        instruct=('A warm, gentle female voice, about 30 years old, native Japanese speaker with standard Tokyo '
+                  'pronunciation. Professional audiobook narrator: emotionally expressive storytelling, clear '
+                  'diction, natural conversational pace, not slow.'),
+        text='静かな夜だった。「本当に、彼は帰ってくると思う？」彼女は小さな声で尋ねた。僕は何も答えられなかった。'),
+    'ko_male_narrator': dict(
+        language='ko',
+        instruct=('A deep, warm male voice, about 40 years old, native Korean speaker with standard Seoul '
+                  'pronunciation. Professional audiobook narrator: calm, expressive, natural intonation, clear '
+                  'diction, moderate pace.'),
+        text=('방 안은 너무 조용해서 옆방의 시계 소리까지 들렸다. "정말 그가 돌아올 거라고 생각해?" 그녀가 작은 '
+              '목소리로 물었다. 나는 아무 대답도 하지 못했다. 창밖은 이미 밝아 오고 있었다.')),
+    'ko_female_narrator': dict(
+        language='ko',
+        instruct=('A warm, gentle female voice, about 30 years old, native Korean speaker with standard Seoul '
+                  'pronunciation. Professional audiobook narrator: soft, emotionally expressive storytelling, clear '
+                  'diction, moderate pace.'),
+        text=('방 안은 너무 조용해서 옆방의 시계 소리까지 들렸다. "정말 그가 돌아올 거라고 생각해?" 그녀가 작은 '
+              '목소리로 물었다. 나는 아무 대답도 하지 못했다. 창밖은 이미 밝아 오고 있었다.')),
     'en_male_narrator': dict(
         language='en',
         instruct=('A deep, warm baritone male voice, about 45 years old. Professional audiobook narrator: calm, '
@@ -55,6 +81,10 @@ PRESETS = {
 }
 
 PREVIEW_TEXTS = {
+    'ja': ('その夜、駅のホームには誰もいなかった。「遅かったじゃない」と、背後から声がした。振り返ると、三年前に別れた'
+           'はずの彼女が、少し困ったように笑っていた。'),
+    'ko': ('그날 밤, 역 승강장에는 아무도 없었다. "늦었네." 뒤에서 누군가 말했다. 돌아보니 삼 년 전에 헤어진 그녀가 '
+           '조금 곤란한 듯 웃고 있었다.'),
     'ru': ('Однажды играли в карты у конногвардейца Нарумова. Долгая зимняя ночь прошла незаметно; сели ужинать в '
            'пятом часу утра. — Что ты сделал, Сурин? — спросил хозяин. — Проиграл, по обыкновению!'),
     'en': ('It was a bright cold day in April, and the clocks were striking thirteen. "Are you coming?" she asked. '
@@ -156,10 +186,16 @@ def cmd_design(args):
             transcript = asr.transcribe(wav, sr)
             cer = char_error_rate(text, transcript)
             info += f', ASR error {cer:.0%}'
-        results.append((folder, cer, mismatch))
+        from audiblez.text import language_profile
+        try:
+            rate_dev = abs(float(np.log(max(rate, 0.1) / language_profile(language)['rate'])))
+        except Exception:
+            rate_dev = 0.0
+        too_long = len(wav) / sr > 16.0  # cloning is most reliable with references under ~15 s
+        results.append((folder, cer, mismatch, too_long, rate_dev))
         print(f'  {folder}  ({info})')
     print('\nListen to the candidates (reference.flac in each folder), then use the one you prefer:')
-    best = min(results, key=lambda r: (r[2], r[1] if r[1] is not None else 0))[0]
+    best = min(results, key=lambda r: (r[2], (r[1] or 0) > 0.10, r[3], r[4] + (r[1] or 0)))[0]
     print(f'  audiblez book.epub --voice-profile {best}')
     print('Tips: typical pitch is 85-155 Hz for male voices and 165-255 Hz for female voices; a deep baritone is '
           'around 90-120 Hz. Discard candidates with a high ASR error, a wrong pitch or odd intonation, and run '

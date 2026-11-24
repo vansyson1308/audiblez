@@ -38,7 +38,10 @@ class Lexicon:
                 rules.append((pattern, dst, True))
             else:
                 escaped = re.sub(r'[еёЕЁ]', lambda m: '[ЕЁ]' if m.group(0).isupper() else '[её]', re.escape(src))
-                pattern = re.compile(rf'(?<!\w){escaped}(?!\w)', re.IGNORECASE)
+                if re.search(_NO_SPACE_SCRIPT, src):  # Japanese/Chinese have no spaces: match anywhere
+                    pattern = re.compile(escaped, re.IGNORECASE)
+                else:
+                    pattern = re.compile(rf'(?<!\w){escaped}(?!\w)', re.IGNORECASE)
                 rules.append((pattern, dst, False))
         return cls(rules)
 
@@ -60,7 +63,65 @@ def _keep_capital(src, dst):
     return dst
 
 
-_CJK = ('zh', 'ja', 'ko')
+_CJK = ('zh', 'ja')  # languages written without spaces; Korean uses spaces and Western punctuation
+_NO_SPACE_SCRIPT = r'[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]'
+_DECORATIONS = r'[♪♫♬☆★♡♥❤✨※◆◇■□●○◎△▲▽▼→←↑↓⇒]'
+
+
+def _fullwidth_alnum_to_ascii(text):
+    """'２０２６年', 'ＡＩ' -> '2026年', 'AI' (full-width punctuation such as ！？「」 is kept)."""
+    return re.sub(r'[\uff10-\uff19\uff21-\uff3a\uff41-\uff5a]', lambda m: unicodedata.normalize('NFKC', m.group(0)),
+                  text)
+
+
+def _halfwidth_katakana_to_fullwidth(text):
+    return re.sub(r'[\uff61-\uff9f]+', lambda m: unicodedata.normalize('NFKC', m.group(0)), text)
+
+
+def _ends_sentence(text, terminals):
+    return bool(re.search(rf'[{terminals}][」』）)\]"”’»]*$', text))
+
+
+def normalize_ja(text, is_heading=False):
+    text = unicodedata.normalize('NFC', text)
+    text = _halfwidth_katakana_to_fullwidth(_fullwidth_alnum_to_ascii(text))
+    text = re.sub(r'(?:\.{3,}|・{3,}|…+)', '……', text)
+    text = re.sub(r'[―—–]{1,}', '……', text)  # 「それは――」: a hesitation / trailing off
+    text = re.sub(r'(?<=[\u3040-\u30ffー])[〜～~]+', 'ー', text)  # 「あ〜」 -> 「あー」 (elongation)
+    text = re.sub(r'[〜～~]', '', text)
+    text = re.sub(r'([！？!?])\1+', r'\1', text)  # 「！！」 -> 「！」 (「！？」 is kept)
+    text = re.sub(r'[【】〔〕［］\[\]{}《》〈〉<>＜＞]', '', text)  # 【鑑定】 -> 鑑定
+    text = re.sub(_DECORATIONS, '', text)
+    text = re.sub(r'[*＊#＃|｜^=＝_]+', '', text)
+    if is_heading:  # 「第一章　旅立ち」 -> 「第一章、旅立ち」: a pause between the number and the title
+        text = re.sub(r'[ \t\u3000]+', '、', text.strip())
+    text = re.sub(r'(?<=[\u3000-\u30ff\u3400-\u9fff\uff01-\uff5e])[ \t\u3000]+(?=[\u3000-\u30ff\u3400-\u9fff])', '',
+                  text)  # no spaces inside Japanese text
+    text = re.sub(r'\s{2,}', ' ', text).strip()
+    if text and not _ends_sentence(text, '。！？!?…'):
+        text += '。'
+    return text
+
+
+def normalize_ko(text, is_heading=False):
+    from audiblez.normalize_ko import normalize_numbers_ko
+    text = unicodedata.normalize('NFC', text)
+    text = _fullwidth_alnum_to_ascii(text)
+    text = text.replace('％', '%')
+    text = normalize_numbers_ko(text, heading=is_heading)  # digits are read unreliably: spell them in Hangul
+    text = text.replace('。', '.').replace('、', ',').replace('！', '!').replace('？', '?').replace('％', '%')
+    text = re.sub(r'(?:\.{3,}|…+|·{3,})', '…', text)
+    text = re.sub(r'([!?])\1+', r'\1', text)
+    text = re.sub(r'(?<=[\uac00-\ud7af])[〜～~]+', '', text)
+    text = re.sub(r'[【】〔〕［］\[\]{}《》〈〉<>＜＞]', '', text)
+    text = re.sub(_DECORATIONS, '', text)
+    text = re.sub(r'[*＊#＃|^=_]+', ' ', text)
+    text = re.sub(r'(?<=\S)[ \t]*([—–―])[ \t]*(?=\S)', r' \1 ', text)
+    text = re.sub(r'[ \t]+([,.;:!?…)])', r'\1', text)
+    text = re.sub(r'\s{2,}', ' ', text).strip()
+    if text and re.search(r'[\w"”’)」』]$', text) and not _ends_sentence(text, '.!?…'):
+        text += '.'
+    return text
 
 
 def normalize_generic(text, lang, is_heading=False):
@@ -76,7 +137,7 @@ def normalize_generic(text, lang, is_heading=False):
     text = re.sub(r'\s{2,}', ' ', text).strip()
     if text and lang not in _CJK and re.search(r'[\w»"”’)]$', text) and not re.search(r'[.!?…:;][»"”’)]*$', text):
         text += '.'
-    elif text and lang in _CJK and not re.search(r'[。！？!?…]$', text):
+    elif text and lang in _CJK and not _ends_sentence(text, '。！？!?…'):
         text += '。'
     return text
 
@@ -90,4 +151,8 @@ def normalize_text(text, lang, is_heading=False, lexicon=None, enabled=True, kee
     if lang == 'ru':
         from audiblez.normalize_ru import normalize_ru
         return normalize_ru(text, is_heading=is_heading, keep_stress=keep_stress)
+    if lang == 'ja':
+        return normalize_ja(text, is_heading=is_heading)
+    if lang == 'ko':
+        return normalize_ko(text, is_heading=is_heading)
     return normalize_generic(text, lang, is_heading=is_heading)
