@@ -5,120 +5,135 @@
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/audiblez)
 ![PyPI - Version](https://img.shields.io/pypi/v/audiblez)
 
-### v5: Russian and 10 languages with Qwen3-TTS, YouTube-ready output, automatic quality control
+### v6: your own stories in Japanese, Korean, Russian… rendered fast on free GPUs
 
-Audiblez generates `.m4b` audiobooks (and `.mp4` videos for YouTube) from e-books (`.epub`, `.fb2`) and story
-scripts (`.txt`, `.md`, `.docx`).
-
-Two speech engines are available:
+Audiblez turns `.epub` e-books **and your own stories** (`.txt`, `.md`, or a folder with one file per chapter) into
+`.m4b` audiobooks and `.mp4` videos for YouTube, with a natural, expressive narrator.
 
 | Engine | Languages | Strengths |
 |---|---|---|
+| [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) 1.7B (Apache-2.0) | 🇯🇵 🇰🇷 🇷🇺 🇬🇧 🇩🇪 🇫🇷 🇪🇸 🇮🇹 🇵🇹 🇨🇳 | very natural and expressive, one cloned narrator for hours |
 | [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) | 🇺🇸 🇬🇧 🇪🇸 🇫🇷 🇮🇳 🇮🇹 🇯🇵 🇧🇷 🇨🇳 | very fast, runs well on CPU |
-| [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) (Apache-2.0) | 🇷🇺 🇬🇧 🇩🇪 🇫🇷 🇪🇸 🇮🇹 🇵🇹 🇨🇳 🇯🇵 🇰🇷 | very natural and expressive, voice cloning and voice design |
 
-The engine is chosen automatically from the e-book language (Kokoro when it supports the language, Qwen3-TTS otherwise,
-e.g. for Russian), or with `--engine`.
+Japanese, Korean and Russian use Qwen3-TTS with a bundled native narrator voice (`ja_male_narrator`,
+`ja_female_narrator`, `ko_male_narrator`, `ko_female_narrator`, `ru_male_narrator`, `ru_female_narrator`); other
+languages use Kokoro when it supports them. Override with `--engine`, `--voice-profile`, `-v`.
 
-What happens between the e-book and the audio file matters as much as the voice:
+What happens between the text and the audio file matters as much as the voice:
 
-- **Any input**: EPUB, FB2 (`.fb2`, `.fb2.zip`, the usual Russian e-book format) and story scripts: plain text
-  (one paragraph per line, or hard-wrapped text that is re-joined; UTF-8 or Windows-1251), Markdown and Word/Google
-  Docs `.docx`. A short first line becomes the title, `Глава 1` / `I` / `## ...` lines become chapters, `* * *`
-  scene breaks, `- Привет, - сказала она` dialogue hyphens become dashes.
-- **Clean text**: block-level EPUB extraction in reading (spine) order, no footnote markers or footnote sections,
-  no table of contents / copyright pages, `<br>` and soft hyphens handled, books stored as a single file are split
-  into their real chapters (`I`, `II`, `Глава 5`...), real chapter titles in the `.m4b` and in YouTube timestamps.
-- **Russian text normalization**: numbers in the right case and gender (`в 1812 году` → *в тысяча восемьсот
-  двенадцатом году*, `до 5 часов` → *до пяти часов*, `Пётр I` → *Пётр Первый*, `XIX в.` → *девятнадцатый век*),
-  dates, money, percentages, abbreviations (`т. е.`, `и т. д.`, `г-н`), restoration of `ё` (`еще` → `ещё`, otherwise
-  it is mispronounced), ALL-CAPS titles (`ОН НЕ ОЖИДАЛ…`) read as normal words while abbreviations (МВД, СССР)
-  stay. Use `--lexicon` for names and words you want pronounced differently, and `--dry-run` to read the
-  normalized script before synthesizing.
-- **Russian word stress** (`--stress ruaccent`): [RUAccent](https://github.com/Den4ikAI/ruaccent) marks the stressed
-  vowel of every word from its context (за́мок / замо́к, все / всё) and the text is read by
-  [a Qwen3-TTS fine-tune that follows the marks](https://huggingface.co/siriusfreak/qwen3-tts-12hz-1.7b-ru-stress-cf)
-  (Apache-2.0; its model card warns that part of its training texts has no declared license).
-- **Natural pacing**: the text is synthesized by sentences grouped within paragraphs (never across them), the silence
-  the model leaves around each chunk is trimmed, and controlled pauses are inserted between sentences, paragraphs,
-  headings, scene breaks (`* * *`) and chapters. `--pause-scale` makes the whole book calmer or faster. The pauses
-  are filled with the voice's own background noise ("room tone", measured in each chapter, about -65 dBFS for
-  Qwen3-TTS) instead of digital silence, so the background does not switch off between sentences
-  (`--no-room-tone` to disable).
-- **Automatic quality control** (Qwen3-TTS): neural TTS sometimes skips words or hallucinates on long texts. Every
-  chunk is checked (speaking rate, length limit, silence, clipping and, if `faster-whisper` is installed, a Whisper
-  transcription compared with the text) and regenerated with another seed when it fails. The chunks that never pass
-  are listed in `qa_report.txt` so you can listen to them.
-- **Mastering**: two-pass EBU R128 loudness normalization (-16 LUFS, -1.5 dBTP), 48 kHz, a single lossy encoding.
-- **Resumable**: every synthesized chunk is cached (atomically); an interrupted run continues where it stopped,
-  changing one paragraph only re-synthesizes that paragraph, and a fully cached run loads no model at all.
-  `--time-limit 11.5` stops cleanly before a cloud session ends.
-- **Fast on GPUs**: every visible GPU is used in parallel (one worker process each, e.g. the free 2 x T4 of
-  Kaggle: `kaggle/audiblez_kaggle.ipynb`), and the optional [faster-qwen3-tts](https://github.com/andimarafioti/faster-qwen3-tts)
-  backend (CUDA graphs, `--qwen-backend fast`) runs the same model ~2x (T4) to ~5x (RTX 4090) faster per GPU.
-  `audiblez-bench` measures backend x precision x batch size on your GPU and recommends the fastest setting that
-  keeps the quality.
-- **YouTube**: `--youtube` creates an `.mp4` (cover over a blurred background, 1080p) and a text file with the chapter
-  timestamps for the description; `--episode-hours 2` splits the book into parts of about 2 hours (at chapter
-  boundaries, or at paragraph boundaries for very long chapters).
+- **Clean text**: EPUBs in reading order without footnote markers, notes, tables of contents or copyright pages;
+  books stored as a single file are split into their real chapters. Your own `.txt`/`.md` files are read with their
+  chapter headings (`# Title`, `第1話`, `第一章`, `제1장`, `1화`, `Глава 5`, `Chapter 3`…), scene breaks (`◇◇◇`,
+  `* * *`, `---`) and an optional front matter (`title:`, `author:`, `language:`, `cover:`). Shift_JIS, EUC-KR, GB18030
+  and cp1251 files are detected automatically.
+- **Japanese**: furigana written like on 小説家になろう / カクヨム / 青空文庫 (`｜颯《はやて》`, `魔王城《まおうじょう》`,
+  `東京（とうきょう）`) and EPUB `<ruby>` are **read with their reading** — the reliable way to get names and rare kanji
+  right; width normalization (`２０２６` → `2026`, half-width katakana), `【】`, `〜`, `――`, emphasis marks, sentence
+  splitting that keeps `「…」と言った` together, chunks cut at `、` / `」`, never inside a word.
+- **Korean**: numbers spelled in Hangul with the right system for the counter (`3명` → *세 명*, `2026년 6월` →
+  *이천이십육 년 유월*, `오후 3시 30분` → *오후 세 시 삼십 분*, `20살` → *스무 살*), sentence splitting on Korean
+  punctuation, spacing kept when lines are joined.
+- **Russian**: numbers in the right case and gender, dates, Roman numerals, abbreviations, restoration of `ё`.
+- **Pronunciation dictionary** (`--lexicon`): lines like `颯 = はやて`, `魔王城 = まおうじょう`, `Германн = Герман`
+  (works inside Japanese text, which has no spaces). `--dry-run` writes the exact normalized script to check first.
+- **Natural pacing**: sentences are synthesized in chunks of about 15-20 s within a paragraph (never across), the
+  model's silences are trimmed and controlled pauses inserted between sentences, paragraphs, headings, scene breaks
+  and chapters; loud or quiet sentences are gently leveled. `--pause-scale` makes the reading calmer or faster.
+- **Automatic quality control**: every chunk is checked (speaking rate for its language, runaway generation, silence,
+  clipping, **clipped sentence endings**, **similarity with the narrator's voice**, and a Whisper transcription
+  compared with the text — through kana readings for Japanese). Failed chunks are regenerated with another seed; the
+  remaining ones are listed in `qa_report.txt`.
+- **Fast**: one worker per GPU (both T4 GPUs of a free Kaggle notebook), the CUDA-graph backend
+  [faster-qwen3-tts](https://github.com/andimarafioti/faster-qwen3-tts) with automatic fallback, batching, and
+  `--benchmark` to measure the fastest precision, backend and batch size on your GPU (every take is quality
+  checked, so a faster setting that damages the audio is never recommended) instead of guessing.
+- **Resumable**: every chunk is cached; an interrupted run (or a 12-hour Kaggle session) continues where it stopped,
+  and editing one paragraph only re-synthesizes that paragraph.
+- **Mastering and YouTube**: -16 LUFS / -1.5 dBTP with a linear gain and peak limiter, `.m4b` with chapters and cover,
+  `--youtube` for a 1080p `.mp4` and the chapter timestamps of the description, `--episode-hours 2` for ~2-hour parts.
 
 ![Audiblez GUI on MacOSX](./imgs/mac.png)
 
-On a Google Colab's T4 GPU via Cuda, **Kokoro takes about 5 minutes to convert "Animal's Farm" by Orwell**
-(about 160,000 characters), at a rate of about 600 characters per second. On an M2 MacBook Pro CPU it takes about
-1 hour. Qwen3-TTS (1.7B parameters) is much heavier: a CUDA GPU is strongly recommended. Measured on a 4-core
-Xeon CPU: voice cloning runs about 8x slower than real time (1 hour of audio takes about 8 hours). Published
-single-GPU figures for the 1.7B model (faster-qwen3-tts author): 0.45x real time on a Tesla T4 with qwen-tts,
-0.93x with CUDA graphs; 4.2x on an RTX 4090. With the two T4 of Kaggle that is about 1.1 h for a 2 h episode.
-
-
-## Russian audiobooks with Qwen3-TTS (quick start)
+## Quick start: a Japanese or Korean story
 
 ```bash
-sudo apt install ffmpeg sox                          # on Ubuntu/Debian (brew install ffmpeg sox on Mac)
-pip install "audiblez[asr]"                          # [asr] adds the automatic Whisper quality control
+sudo apt install ffmpeg                                    # (brew install ffmpeg on Mac)
+pip install "audiblez[qwen,asr,ja] @ git+https://github.com/vansyson1308/audiblez.git"   # CPU / any GPU
+# or, on an NVIDIA GPU, the CUDA-graph backend instead of [qwen]:
+pip install "audiblez[fast,asr,ja] @ git+https://github.com/vansyson1308/audiblez.git"
 
-audiblez book.epub --dry-run                         # 1. check chapters and the normalized text (script.txt)
-audiblez book.epub --chapters 1                      # 2. listen to the first chapter
-audiblez book.epub --youtube --episode-hours 2       # 3. the whole book as ~2 h YouTube videos + .m4b
-audiblez story.txt --youtube --stress ruaccent       # a story script, with automatic word stress
-audiblez-bench                                       # fastest settings for this GPU
+audiblez story.md --dry-run                                # 1. check chapters and story.audiblez/script.txt
+audiblez story.md --chapters 1                             # 2. listen to the first chapter
+audiblez story.md --youtube --episode-hours 2              # 3. ~2 h YouTube videos + .m4b audiobooks
+audiblez story.md --voice-profile ko_female_narrator       #    another narrator (audiblez-voice list)
 ```
 
-Step-by-step guide (Vietnamese): [docs/huong-dan-audiobook-tieng-nga.md](docs/huong-dan-audiobook-tieng-nga.md);
-free GPU rendering on Kaggle: [kaggle/README.md](kaggle/README.md).
+`qwen` and `fast` both provide the `qwen_tts` module: install one of them per environment, never both.
 
-Without voice options, Russian books are read by the bundled `ru_male_narrator` voice. Other bundled voices:
-`audiblez-voice list`. For the best result, design (or record) your own narrator and use it for the whole book:
+`story.md` can look like this (or be a plain `.txt` with one paragraph per line, or a folder of chapter files):
+
+```markdown
+---
+title: 星を継ぐ者
+author: 山田太郎
+---
+# 第1話　出会い
+
+　雨が降っていた。｜颯《はやて》は傘を持っていなかった。
+「待って！」と彼女は叫んだ。
+
+◇◇◇
+
+# 第2話　約束
+```
+
+## Fast rendering on Kaggle (free 2× T4)
+
+Qwen3-TTS 1.7B needs a GPU for long books (on a 4-core CPU, 1 hour of audio takes about 8 hours). Kaggle gives about
+30 GPU-hours per week with two T4 GPUs. Open [`kaggle/audiblez_kaggle.ipynb`](kaggle/audiblez_kaggle.ipynb) on
+Kaggle (or push it with `kaggle kernels push -p kaggle --accelerator NvidiaTeslaT4` after editing
+`kaggle/kernel-metadata.json`), select *GPU T4 x2* and *Internet on*, add your story as a dataset, set `BOOK` and
+`VOICE`, and run *Save & Run All*. The notebook installs audiblez, checks the text, benchmarks precision (float32 / bfloat16 /
+float16), backends and batch sizes on the T4s, keeping only settings whose takes pass the quality checks, renders
+with one worker per GPU and saves the videos, audiobooks and chapter lists in the *Output* tab. A run that
+hits the 12-hour limit can be resumed from its output (`RESUME_FROM`).
+
+Step-by-step guides (Vietnamese): [Japanese / Korean stories on Kaggle](docs/huong-dan-audiobook-nhat-han.md),
+[Russian audiobooks](docs/huong-dan-audiobook-tieng-nga.md).
+
+## Voices
+
+`audiblez-voice list` shows the bundled voices and presets. For the best result, design (or record) your own
+narrator and use it for the whole series:
 
 ```bash
-audiblez-voice design --preset ru_male_narrator -n 6          # 6 candidates in ./voices/ru_male_narrator/
-audiblez-voice design --name grandpa --language ru \
-    --instruct "An older male voice, 65 years old, native Russian, husky, warm, unhurried storyteller"
-audiblez-voice create --audio my_voice.wav --text "Exact transcript of the recording" -o voices/me
-audiblez-voice preview --voice-profile voices/ru_male_narrator/candidate_03 -o test.wav
-audiblez book.epub --voice-profile voices/ru_male_narrator/candidate_03 --youtube --episode-hours 2
+audiblez-voice design --preset ja_male_narrator -n 6           # 6 candidates in ./voices/ja_male_narrator/
+audiblez-voice design --name grandpa --language ko \
+    --instruct "An older male voice, 65 years old, native Korean, husky, warm, unhurried storyteller"
+audiblez-voice create --audio my_voice.wav --text "Exact transcript of the recording" -o voices/me --language ja
+audiblez-voice preview --voice-profile voices/ja_male_narrator/candidate_03 --language ja -o test.wav
+audiblez story.md --voice-profile voices/ja_male_narrator/candidate_03 --youtube --episode-hours 2
 ```
 
-Each candidate prints its pitch (a deep baritone is around 90-120 Hz) and Whisper error: the voice design model does
-not always follow the description, so listen and keep the one you like. A voice profile is a folder with a 6-15 s
-clean reference (`reference.flac`) and its exact transcript (`reference.txt`). Why cloning: the built-in Qwen3-TTS
-speakers (`--speaker Ryan`...) speak Russian with a foreign accent, and `--instruct` voice design alone can drift
-between sentences; a cloned reference keeps the same native voice for hours. Only clone voices you have the rights to.
+Each candidate prints its length, pitch (male voices 85-155 Hz, a deep baritone 90-120 Hz, female 165-255 Hz),
+speaking rate and Whisper error: the voice design model does not always follow the description, so listen and keep
+the one you like. A voice profile is a folder with a 6-15 s clean reference (`reference.flac`) and its exact
+transcript (`reference.txt`). Cloning keeps the same native voice for hours; the built-in Qwen3-TTS speakers
+(`--speaker Ono_Anna`, `--speaker Sohee`…) are an alternative with style instructions (`--instruct`). Only clone
+voices you have the rights to.
 
-Useful options for long books: `--batch-size 8` (more GPU throughput on large GPUs; default 4 on CUDA), `--lexicon names.txt` (lines like
-`Германн = Герман`), `--temperature 0.7` (steadier, less expressive), `--retry-failed` (regenerate the chunks of the
-QA report), `--loudness -14` (louder masters), `--cover image.jpg` (video/m4b artwork).
+Useful options for long books: `--lexicon names.txt`, `--temperature 0.7` (steadier, less expressive),
+`--retry-failed` (regenerate the chunks of the QA report), `--loudness -14` (louder masters), `--cover image.jpg`,
+`--gpus 0,1` / `--gpus off`, `--backend faster|qwen-tts`, `--batch-size 8` (large GPUs).
 
 ## How to install the Command Line tool
 
-If you have Python 3.10-3.13 on your computer, you can install it with pip (Kokoro is only installed on
-Python 3.10-3.12; on 3.13, as on Kaggle and Colab, Qwen3-TTS is used).
+If you have Python 3.10-3.12 on your computer, you can install it with pip.
 You also need `espeak-ng` (Kokoro) and `ffmpeg` installed on your machine:
 
 ```bash
 sudo apt install ffmpeg espeak-ng                   # on Ubuntu/Debian 🐧
-pip install audiblez
+pip install "audiblez[qwen,asr]"                    # [qwen]: Qwen3-TTS engine, [asr]: Whisper quality control
 ```
 
 ```bash
@@ -218,8 +233,7 @@ For all the options available, check the help page `audiblez --help` and `audibl
 
 ```bash
 pip install pytest
-pytest test/test_text.py test/test_normalize_ru.py test/test_audio_export.py test/test_pipeline.py \
-    test/test_sources.py test/test_stress_ru.py test/test_parallel.py test/test_bench.py
+pytest test/test_text.py test/test_normalize_ru.py test/test_audio_export.py test/test_pipeline.py test/test_cjk.py
 ```
 
 ## Author

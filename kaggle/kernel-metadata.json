@@ -1,6 +1,6 @@
 {
-  "id": "YOUR_KAGGLE_USERNAME/audiblez-ru",
-  "title": "audiblez-ru",
+  "id": "YOUR_KAGGLE_USERNAME/audiblez-render",
+  "title": "audiblez-render",
   "code_file": "audiblez_kaggle.ipynb",
   "language": "python",
   "kernel_type": "notebook",
@@ -8,7 +8,9 @@
   "enable_gpu": true,
   "enable_tpu": false,
   "enable_internet": true,
-  "dataset_sources": ["YOUR_KAGGLE_USERNAME/audiblez-input"],
+  "dataset_sources": [
+    "YOUR_KAGGLE_USERNAME/my-story"
+  ],
   "competition_sources": [],
   "kernel_sources": [],
   "model_sources": []

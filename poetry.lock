@@ -40,7 +40,6 @@ description = "Addict is a dictionary whose items can be set using both attribut
 optional = false
 python-versions = "*"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "addict-2.4.0-py3-none-any.whl", hash = "sha256:249bb56bbfd3cdc2a004ea0ff4c2b6ddc84d53bc2194761636eb314d5cfa5dfc"},
     {file = "addict-2.4.0.tar.gz", hash = "sha256:b3b2210e0e067a281f5646c8c5db92e99b7231ea8b0eb5f74dbdf9e259d4e494"},
@@ -403,66 +402,6 @@ tests = ["cloudpickle ; platform_python_implementation == \"CPython\"", "hypothe
 tests-mypy = ["mypy (>=1.11.1) ; platform_python_implementation == \"CPython\" and python_version >= \"3.10\"", "pytest-mypy-plugins ; platform_python_implementation == \"CPython\" and python_version >= \"3.10\""]
 
 [[package]]
-name = "audioop-lts"
-version = "0.2.2"
-description = "LTS Port of Python audioop"
-optional = false
-python-versions = ">=3.13"
-groups = ["main"]
-markers = "python_version == \"3.13\""
-files = [
-    {file = "audioop_lts-0.2.2-cp313-abi3-macosx_10_13_universal2.whl", hash = "sha256:fd3d4602dc64914d462924a08c1a9816435a2155d74f325853c1f1ac3b2d9800"},
-    {file = "audioop_lts-0.2.2-cp313-abi3-macosx_10_13_x86_64.whl", hash = "sha256:550c114a8df0aafe9a05442a1162dfc8fec37e9af1d625ae6060fed6e756f303"},
-    {file = "audioop_lts-0.2.2-cp313-abi3-macosx_11_0_arm64.whl", hash = "sha256:9a13dc409f2564de15dd68be65b462ba0dde01b19663720c68c1140c782d1d75"},
-    {file = "audioop_lts-0.2.2-cp313-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:51c916108c56aa6e426ce611946f901badac950ee2ddaf302b7ed35d9958970d"},
-    {file = "audioop_lts-0.2.2-cp313-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:47eba38322370347b1c47024defbd36374a211e8dd5b0dcbce7b34fdb6f8847b"},
-    {file = "audioop_lts-0.2.2-cp313-abi3-manylinux2014_ppc64le.manylinux_2_17_ppc64le.manylinux_2_28_ppc64le.whl", hash = "sha256:ba7c3a7e5f23e215cb271516197030c32aef2e754252c4c70a50aaff7031a2c8"},
-    {file = "audioop_lts-0.2.2-cp313-abi3-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl", hash = "sha256:def246fe9e180626731b26e89816e79aae2276f825420a07b4a647abaa84becc"},
-    {file = "audioop_lts-0.2.2-cp313-abi3-manylinux_2_31_riscv64.manylinux_2_39_riscv64.whl", hash = "sha256:e160bf9df356d841bb6c180eeeea1834085464626dc1b68fa4e1d59070affdc3"},
-    {file = "audioop_lts-0.2.2-cp313-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:4b4cd51a57b698b2d06cb9993b7ac8dfe89a3b2878e96bc7948e9f19ff51dba6"},
-    {file = "audioop_lts-0.2.2-cp313-abi3-musllinux_1_2_ppc64le.whl", hash = "sha256:4a53aa7c16a60a6857e6b0b165261436396ef7293f8b5c9c828a3a203147ed4a"},
-    {file = "audioop_lts-0.2.2-cp313-abi3-musllinux_1_2_riscv64.whl", hash = "sha256:3fc38008969796f0f689f1453722a0f463da1b8a6fbee11987830bfbb664f623"},
-    {file = "audioop_lts-0.2.2-cp313-abi3-musllinux_1_2_s390x.whl", hash = "sha256:15ab25dd3e620790f40e9ead897f91e79c0d3ce65fe193c8ed6c26cffdd24be7"},
-    {file = "audioop_lts-0.2.2-cp313-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:03f061a1915538fd96272bac9551841859dbb2e3bf73ebe4a23ef043766f5449"},
-    {file = "audioop_lts-0.2.2-cp313-abi3-win32.whl", hash = "sha256:3bcddaaf6cc5935a300a8387c99f7a7fbbe212a11568ec6cf6e4bc458c048636"},
-    {file = "audioop_lts-0.2.2-cp313-abi3-win_amd64.whl", hash = "sha256:a2c2a947fae7d1062ef08c4e369e0ba2086049a5e598fda41122535557012e9e"},
-    {file = "audioop_lts-0.2.2-cp313-abi3-win_arm64.whl", hash = "sha256:5f93a5db13927a37d2d09637ccca4b2b6b48c19cd9eda7b17a2e9f77edee6a6f"},
-    {file = "audioop_lts-0.2.2-cp313-cp313t-macosx_10_13_universal2.whl", hash = "sha256:73f80bf4cd5d2ca7814da30a120de1f9408ee0619cc75da87d0641273d202a09"},
-    {file = "audioop_lts-0.2.2-cp313-cp313t-macosx_10_13_x86_64.whl", hash = "sha256:106753a83a25ee4d6f473f2be6b0966fc1c9af7e0017192f5531a3e7463dce58"},
-    {file = "audioop_lts-0.2.2-cp313-cp313t-macosx_11_0_arm64.whl", hash = "sha256:fbdd522624141e40948ab3e8cdae6e04c748d78710e9f0f8d4dae2750831de19"},
-    {file = "audioop_lts-0.2.2-cp313-cp313t-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:143fad0311e8209ece30a8dbddab3b65ab419cbe8c0dde6e8828da25999be911"},
-    {file = "audioop_lts-0.2.2-cp313-cp313t-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:dfbbc74ec68a0fd08cfec1f4b5e8cca3d3cd7de5501b01c4b5d209995033cde9"},
-    {file = "audioop_lts-0.2.2-cp313-cp313t-manylinux2014_ppc64le.manylinux_2_17_ppc64le.manylinux_2_28_ppc64le.whl", hash = "sha256:cfcac6aa6f42397471e4943e0feb2244549db5c5d01efcd02725b96af417f3fe"},
-    {file = "audioop_lts-0.2.2-cp313-cp313t-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl", hash = "sha256:752d76472d9804ac60f0078c79cdae8b956f293177acd2316cd1e15149aee132"},
-    {file = "audioop_lts-0.2.2-cp313-cp313t-manylinux_2_31_riscv64.manylinux_2_39_riscv64.whl", hash = "sha256:83c381767e2cc10e93e40281a04852facc4cd9334550e0f392f72d1c0a9c5753"},
-    {file = "audioop_lts-0.2.2-cp313-cp313t-musllinux_1_2_aarch64.whl", hash = "sha256:c0022283e9556e0f3643b7c3c03f05063ca72b3063291834cca43234f20c60bb"},
-    {file = "audioop_lts-0.2.2-cp313-cp313t-musllinux_1_2_ppc64le.whl", hash = "sha256:a2d4f1513d63c795e82948e1305f31a6d530626e5f9f2605408b300ae6095093"},
-    {file = "audioop_lts-0.2.2-cp313-cp313t-musllinux_1_2_riscv64.whl", hash = "sha256:c9c8e68d8b4a56fda8c025e538e639f8c5953f5073886b596c93ec9b620055e7"},
-    {file = "audioop_lts-0.2.2-cp313-cp313t-musllinux_1_2_s390x.whl", hash = "sha256:96f19de485a2925314f5020e85911fb447ff5fbef56e8c7c6927851b95533a1c"},
-    {file = "audioop_lts-0.2.2-cp313-cp313t-musllinux_1_2_x86_64.whl", hash = "sha256:e541c3ef484852ef36545f66209444c48b28661e864ccadb29daddb6a4b8e5f5"},
-    {file = "audioop_lts-0.2.2-cp313-cp313t-win32.whl", hash = "sha256:d5e73fa573e273e4f2e5ff96f9043858a5e9311e94ffefd88a3186a910c70917"},
-    {file = "audioop_lts-0.2.2-cp313-cp313t-win_amd64.whl", hash = "sha256:9191d68659eda01e448188f60364c7763a7ca6653ed3f87ebb165822153a8547"},
-    {file = "audioop_lts-0.2.2-cp313-cp313t-win_arm64.whl", hash = "sha256:c174e322bb5783c099aaf87faeb240c8d210686b04bd61dfd05a8e5a83d88969"},
-    {file = "audioop_lts-0.2.2-cp314-cp314t-macosx_10_13_universal2.whl", hash = "sha256:f9ee9b52f5f857fbaf9d605a360884f034c92c1c23021fb90b2e39b8e64bede6"},
-    {file = "audioop_lts-0.2.2-cp314-cp314t-macosx_10_13_x86_64.whl", hash = "sha256:49ee1a41738a23e98d98b937a0638357a2477bc99e61b0f768a8f654f45d9b7a"},
-    {file = "audioop_lts-0.2.2-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:5b00be98ccd0fc123dcfad31d50030d25fcf31488cde9e61692029cd7394733b"},
-    {file = "audioop_lts-0.2.2-cp314-cp314t-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:a6d2e0f9f7a69403e388894d4ca5ada5c47230716a03f2847cfc7bd1ecb589d6"},
-    {file = "audioop_lts-0.2.2-cp314-cp314t-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:f9b0b8a03ef474f56d1a842af1a2e01398b8f7654009823c6d9e0ecff4d5cfbf"},
-    {file = "audioop_lts-0.2.2-cp314-cp314t-manylinux2014_ppc64le.manylinux_2_17_ppc64le.manylinux_2_28_ppc64le.whl", hash = "sha256:2b267b70747d82125f1a021506565bdc5609a2b24bcb4773c16d79d2bb260bbd"},
-    {file = "audioop_lts-0.2.2-cp314-cp314t-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl", hash = "sha256:0337d658f9b81f4cd0fdb1f47635070cc084871a3d4646d9de74fdf4e7c3d24a"},
-    {file = "audioop_lts-0.2.2-cp314-cp314t-manylinux_2_31_riscv64.manylinux_2_39_riscv64.whl", hash = "sha256:167d3b62586faef8b6b2275c3218796b12621a60e43f7e9d5845d627b9c9b80e"},
-    {file = "audioop_lts-0.2.2-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:0d9385e96f9f6da847f4d571ce3cb15b5091140edf3db97276872647ce37efd7"},
-    {file = "audioop_lts-0.2.2-cp314-cp314t-musllinux_1_2_ppc64le.whl", hash = "sha256:48159d96962674eccdca9a3df280e864e8ac75e40a577cc97c5c42667ffabfc5"},
-    {file = "audioop_lts-0.2.2-cp314-cp314t-musllinux_1_2_riscv64.whl", hash = "sha256:8fefe5868cd082db1186f2837d64cfbfa78b548ea0d0543e9b28935ccce81ce9"},
-    {file = "audioop_lts-0.2.2-cp314-cp314t-musllinux_1_2_s390x.whl", hash = "sha256:58cf54380c3884fb49fdd37dfb7a772632b6701d28edd3e2904743c5e1773602"},
-    {file = "audioop_lts-0.2.2-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:088327f00488cdeed296edd9215ca159f3a5a5034741465789cad403fcf4bec0"},
-    {file = "audioop_lts-0.2.2-cp314-cp314t-win32.whl", hash = "sha256:068aa17a38b4e0e7de771c62c60bbca2455924b67a8814f3b0dee92b5820c0b3"},
-    {file = "audioop_lts-0.2.2-cp314-cp314t-win_amd64.whl", hash = "sha256:a5bf613e96f49712073de86f20dbdd4014ca18efd4d34ed18c75bd808337851b"},
-    {file = "audioop_lts-0.2.2-cp314-cp314t-win_arm64.whl", hash = "sha256:b492c3b040153e68b9fdaff5913305aaaba5bb433d8a7f73d5cf6a64ed3cc1dd"},
-    {file = "audioop_lts-0.2.2.tar.gz", hash = "sha256:64d0c62d88e67b98a1a5e71987b7aa7b5bcffc7dcee65b635823dbdd0a8dbbd0"},
-]
-
-[[package]]
 name = "audioread"
 version = "3.1.0"
 description = "Multi-library, cross-platform audio decoding."
@@ -473,10 +412,6 @@ files = [
     {file = "audioread-3.1.0-py3-none-any.whl", hash = "sha256:b30d1df6c5d3de5dcef0fb0e256f6ea17bdcf5f979408df0297d8a408e2971b4"},
     {file = "audioread-3.1.0.tar.gz", hash = "sha256:1c4ab2f2972764c896a8ac61ac53e261c8d29f0c6ccd652f84e18f08a4cab190"},
 ]
-
-[package.dependencies]
-standard-aifc = {version = "*", markers = "python_version >= \"3.13\""}
-standard-sunau = {version = "*", markers = "python_version >= \"3.13\""}
 
 [package.extras]
 gi = ["pygobject (>=3.54.2,<4.0.0)"]
@@ -561,7 +496,7 @@ description = "Pythonic bindings for FFmpeg's libraries."
 optional = true
 python-versions = ">=3.12"
 groups = ["main"]
-markers = "python_version >= \"3.12\" and extra == \"asr\""
+markers = "python_version == \"3.12\" and extra == \"asr\""
 files = [
     {file = "av-19.0.2-cp312-abi3-macosx_11_0_x86_64.whl", hash = "sha256:f5f7bcf987567cd3f9b01f1c375c59bf59d8a5b98c9c5c154aeda7a11e0c5dce"},
     {file = "av-19.0.2-cp312-abi3-macosx_14_0_arm64.whl", hash = "sha256:b0dff6dfcc6ff9944fbbff15bc4ee2d90a2c1695d493bdea96e86f48823e9feb"},
@@ -591,7 +526,6 @@ description = "Internationalization utilities"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "babel-2.17.0-py3-none-any.whl", hash = "sha256:4d0b53093fdfb4b21c92b5213dba5a1b23885afa8383709427046b21c366e5f2"},
     {file = "babel-2.17.0.tar.gz", hash = "sha256:0c54cffb19f690cdcc52a3b50bcbf71e07a808d1c80d549f2459b9d2cf0afb9d"},
@@ -629,7 +563,6 @@ description = "Bibtex parser for python 3"
 optional = false
 python-versions = "*"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "bibtexparser-2.0.0b8-py3-none-any.whl", hash = "sha256:eda1e6dbc7bbc040d351c926ead97a36f4734858656f3514a933259878bd37f1"},
     {file = "bibtexparser-2.0.0b8.tar.gz", hash = "sha256:11eaaa1fe80154f70092e91fa7e3fed5e5c81021f6c6c09151e36b8533f36994"},
@@ -649,7 +582,6 @@ description = "The Blis BLAS-like linear algebra library, as a self-contained C-
 optional = false
 python-versions = "<3.13,>=3.6"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "blis-1.2.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:76998702acbb782e9bb298a5c446aaa1ed4652dbade853baa6a7a26f7b98105b"},
     {file = "blis-1.2.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:1c290c1ba6cb5b633abe59b2fb9ae2ea5dcd7508202f65658fe816bb7e129485"},
@@ -692,7 +624,6 @@ description = "Super lightweight function registries for your library"
 optional = false
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "catalogue-2.0.10-py3-none-any.whl", hash = "sha256:58c2de0020aa90f4a2da7dfad161bf7b3b054c86a5f09fcedc0b2b740c109a9f"},
     {file = "catalogue-2.0.10.tar.gz", hash = "sha256:4f56daa940913d3f09d589c191c74e5a6d51762b3a9e37dd53b7437afd6cda15"},
@@ -914,7 +845,6 @@ description = "Utilities for programmatic data curation"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "clldutils-3.24.1-py2.py3-none-any.whl", hash = "sha256:12c34f61071bd40460ab39acef525ce528fa7868b9965742ffb98d5fd64e6549"},
     {file = "clldutils-3.24.1.tar.gz", hash = "sha256:3c766c4f4691bf52a21f6f8c6c8b944bc864d168ee851a3890a689a466e8169a"},
@@ -943,7 +873,6 @@ description = "pathlib-style classes for cloud storage services."
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "cloudpathlib-0.20.0-py3-none-any.whl", hash = "sha256:7af3bcefbf73392ae7f31c08b3660ec31607f8c01b7f6262d4d73469a845f641"},
     {file = "cloudpathlib-0.20.0.tar.gz", hash = "sha256:f6ef7ca409a510f7ba4639ba50ab3fc5b6dee82d6dff0d7f5715fd0c9ab35891"},
@@ -965,7 +894,6 @@ description = "Convert Chinese numerals and Arabic numerals."
 optional = false
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "cn2an-0.5.23-py3-none-any.whl", hash = "sha256:b19ab3c53676765c038ccdab51f69b7efa4f0b888139c34088935769241f1cbf"},
     {file = "cn2an-0.5.23.tar.gz", hash = "sha256:eda06a63e5eff4a64488d9f22e5f2a4ceca6eaa63416e4f771e67edecb1a5bdb"},
@@ -985,7 +913,7 @@ files = [
     {file = "colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6"},
     {file = "colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44"},
 ]
-markers = {main = "python_version < \"3.13\" or platform_system == \"Windows\"", dev = "platform_system == \"Windows\" or sys_platform == \"win32\""}
+markers = {dev = "platform_system == \"Windows\" or sys_platform == \"win32\""}
 
 [[package]]
 name = "colorlog"
@@ -994,7 +922,6 @@ description = "Add colours to the output of Python's logging module."
 optional = false
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "colorlog-6.9.0-py3-none-any.whl", hash = "sha256:5906e71acd67cb07a71e779c47c4bcb45fb8c2993eebe9e5adcd6a6f1b283eff"},
     {file = "colorlog-6.9.0.tar.gz", hash = "sha256:bfba54a1b93b94f54e1f4fe48395725a3d92fd2a4af702f6bd70946bdc0c6ac2"},
@@ -1013,7 +940,6 @@ description = "The sweetest config system for Python"
 optional = false
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "confection-0.1.5-py3-none-any.whl", hash = "sha256:e29d3c3f8eac06b3f77eb9dfb4bf2fc6bcc9622a98ca00a698e3d019c6430b14"},
     {file = "confection-0.1.5.tar.gz", hash = "sha256:8e72dd3ca6bd4f48913cd220f10b8275978e740411654b6e8ca6d7008c590f0e"},
@@ -1201,7 +1127,6 @@ description = "Python library to work with CSVW described tabular data"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "csvw-3.5.1-py2.py3-none-any.whl", hash = "sha256:8dd3864aae51bfd943713a62ec2c6688d3f406a9627b5f16de2479b1281febe5"},
     {file = "csvw-3.5.1.tar.gz", hash = "sha256:e13dfcbf56a51f66bd4c6b442b8b32b3fee4b615dcd9436149832b41572938f3"},
@@ -1292,7 +1217,6 @@ description = "Lightweight piece tokenization library"
 optional = false
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "curated-tokenizers-0.0.9.tar.gz", hash = "sha256:c93d47e54ab3528a6db2796eeb4bdce5d44e8226c671e42c2f23522ab1d0ce25"},
     {file = "curated_tokenizers-0.0.9-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:19d3a2570dbbd08bbdae4c79d187fb150ea3b663c2f060bd1e4a050a1358cfd1"},
@@ -1340,7 +1264,6 @@ description = "Curated transformer models"
 optional = false
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "curated-transformers-0.1.1.tar.gz", hash = "sha256:4671f03314df30efda2ec2b59bc7692ea34fcea44cb65382342c16684e8a2119"},
     {file = "curated_transformers-0.1.1-py2.py3-none-any.whl", hash = "sha256:d716063d73d803c6925d2dab56fde9b9ab8e89e663c2c0587804944ba488ff01"},
@@ -1372,7 +1295,6 @@ description = "Manage calls to calloc/free through Cython"
 optional = false
 python-versions = "*"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "cymem-2.0.11-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:1b4dd8f8c2475c7c9948eefa89c790d83134600858d8d43b90276efd8df3882e"},
     {file = "cymem-2.0.11-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:d46ba0d2e0f749195297d16f2286b55af7d7c084db2b853fdfccece2c000c5dc"},
@@ -1479,7 +1401,6 @@ description = "Python wrapper for libc's dlinfo and dyld_find on Mac"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "dlinfo-2.0.0-py3-none-any.whl", hash = "sha256:b32cc18e3ea67c0ca9ca409e5b41eed863bd1363dbc9dd3de90fedf11b61e7bc"},
     {file = "dlinfo-2.0.0.tar.gz", hash = "sha256:88a2bc04f51d01bc604cdc9eb1c3cc0bde89057532ca6a3e71a41f6235433e17"},
@@ -1530,7 +1451,6 @@ description = "A Python package that provides shared library loader for eSpeak N
 optional = false
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "espeakng_loader-0.2.4-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:b77477ae2ddf62a748e04e49714eabb2f3a24f344166200b00539083bd669904"},
     {file = "espeakng_loader-0.2.4-py3-none-macosx_11_0_arm64.whl", hash = "sha256:d27cdca31112226e7299d8562e889d3e38a1e48055c9ee381b45d669072ee59f"},
@@ -2230,7 +2150,6 @@ description = "An ISO 8601 date/time/duration parser and formatter"
 optional = false
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "isodate-0.7.2-py3-none-any.whl", hash = "sha256:28009937d8031054830160fce6d409ed342816b543597cece116d966c6d99e15"},
     {file = "isodate-0.7.2.tar.gz", hash = "sha256:4cd1aa0f43ca76f4a6c6c0292a85f40b35ec2e43e315b59f06e6d32171a953e6"},
@@ -2243,7 +2162,6 @@ description = "Chinese Words Segmentation Utilities"
 optional = false
 python-versions = "*"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "jieba-0.42.1.tar.gz", hash = "sha256:055ca12f62674fafed09427f176506079bc135638a14e23e25be909131928db2"},
 ]
@@ -2473,7 +2391,6 @@ description = "TTS"
 optional = false
 python-versions = "<3.13,>=3.10"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "kokoro-0.9.4-py3-none-any.whl", hash = "sha256:a129dc6364a286bd6a92c396e9862459d3d3e45f2c15596ed5a94dcee5789efd"},
     {file = "kokoro-0.9.4.tar.gz", hash = "sha256:fbf633262797f8cf46fdac3315cf9cade67dc8b762c0feccf334892772fb9ac4"},
@@ -2494,7 +2411,6 @@ description = "Tools for labeling human languages with IETF language tags"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "langcodes-3.5.0-py3-none-any.whl", hash = "sha256:853c69d1a35e0e13da2f427bb68fb2fa4a8f4fb899e0c62ad8df8d073dcfed33"},
     {file = "langcodes-3.5.0.tar.gz", hash = "sha256:1eef8168d07e51e131a2497ffecad4b663f6208e7c3ae3b8dc15c51734a6f801"},
@@ -2514,7 +2430,6 @@ description = "Supplementary data about languages used by the langcodes module"
 optional = false
 python-versions = "*"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "language_data-1.3.0-py3-none-any.whl", hash = "sha256:e2ee943551b5ae5f89cd0e801d1fc3835bb0ef5b7e9c3a4e8e17b2b214548fbf"},
     {file = "language_data-1.3.0.tar.gz", hash = "sha256:7600ef8aa39555145d06c89f0c324bf7dab834ea0b0a439d8243762e3ebad7ec"},
@@ -2534,7 +2449,6 @@ description = "This project is a Python version of the language-tags Javascript 
 optional = false
 python-versions = "*"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "language_tags-1.2.0-py3-none-any.whl", hash = "sha256:d815604622242fdfbbfd747b40c31213617fd03734a267f2e39ee4bd73c88722"},
     {file = "language_tags-1.2.0.tar.gz", hash = "sha256:e934acba3e3dc85f867703eca421847a9ab7b7679b11b5d5cfd096febbf8bde6"},
@@ -2585,8 +2499,6 @@ scikit-learn = ">=1.1.0"
 scipy = ">=1.6.0"
 soundfile = ">=0.12.1"
 soxr = ">=0.3.2"
-standard-aifc = {version = "*", markers = "python_version >= \"3.13\""}
-standard-sunau = {version = "*", markers = "python_version >= \"3.13\""}
 typing_extensions = ">=4.1.1"
 
 [package.extras]
@@ -2665,7 +2577,6 @@ description = "Python logging made (stupidly) simple"
 optional = false
 python-versions = "<4.0,>=3.5"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "loguru-0.7.3-py3-none-any.whl", hash = "sha256:31a33c10c8e1e10422bfd431aeb5d351c7cf7fa671e3c4df004162264b28220c"},
     {file = "loguru-0.7.3.tar.gz", hash = "sha256:19480589e77d47b8d85b2c827ad95d49bf31b0dcde16593892eb51dd18706eb6"},
@@ -2840,7 +2751,6 @@ description = "Static memory-efficient and fast Trie-like structures for Python.
 optional = false
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "marisa_trie-1.2.1-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:a2eb41d2f9114d8b7bd66772c237111e00d2bae2260824560eaa0a1e291ce9e8"},
     {file = "marisa_trie-1.2.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:9e956e6a46f604b17d570901e66f5214fb6f658c21e5e7665deace236793cef6"},
@@ -2933,7 +2843,6 @@ description = "Python implementation of John Gruber's Markdown."
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "Markdown-3.7-py3-none-any.whl", hash = "sha256:7eb6df5690b81a1d7942992c97fad2938e956e79df20cbc6186e9c3a77b1c803"},
     {file = "markdown-3.7.tar.gz", hash = "sha256:2ae2471477cfd02dbbf038d5d9bc226d40def84b4fe2986e49b59b6b472bbed2"},
@@ -3234,7 +3143,6 @@ description = "G2P engine for TTS"
 optional = false
 python-versions = "<3.13,>=3.8"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "misaki-0.9.4-py3-none-any.whl", hash = "sha256:90e2eeb169786c014c429e5058d2ea6bcd02d651f2a24450ba6c9ffc0f8da15a"},
     {file = "misaki-0.9.4.tar.gz", hash = "sha256:3960fa3e6de179a90ee8e628446a4a4f6b8c730b6e3410999cf396189f4d9c40"},
@@ -3735,7 +3643,6 @@ description = "Cython bindings for MurmurHash"
 optional = false
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "murmurhash-1.0.12-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:a3f492bbf6f879b6eaf9da4be7471f4b68a3e3ae525aac0f35c2ae27ec91265c"},
     {file = "murmurhash-1.0.12-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:3493e0c10a64fa72026af2ea2271d8b3511a438de3c6a771b7a57771611b9c08"},
@@ -4214,7 +4121,6 @@ description = "An OrderedSet is a custom MutableSet that remembers its order, so
 optional = false
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "ordered-set-4.1.0.tar.gz", hash = "sha256:694a8e44c87657c59292ede72891eb91d34131f6531463aab3009191c77364a8"},
     {file = "ordered_set-4.1.0-py3-none-any.whl", hash = "sha256:046e1132c71fcf3330438a539928932caf51ddbc582496833e23de611de14562"},
@@ -4508,7 +4414,6 @@ description = "Simple text to phones converter for multiple languages"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "phonemizer_fork-3.3.2-py3-none-any.whl", hash = "sha256:97305c76f4183b3825dae8f4c032265fe78c9946ce58c47d4b62161349264b74"},
     {file = "phonemizer_fork-3.3.2.tar.gz", hash = "sha256:10e16e827d0443b087062e21b55e805c00989cf1343b2e81e734cae5f6c0cf69"},
@@ -4816,7 +4721,6 @@ description = "Cython hash table that trusts the keys are pre-hashed"
 optional = false
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "preshed-3.0.9-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:4f96ef4caf9847b2bb9868574dcbe2496f974e41c2b83d6621c24fb4c3fc57e3"},
     {file = "preshed-3.0.9-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:a61302cf8bd30568631adcdaf9e6b21d40491bd89ba8ebf67324f98b6c2a2c05"},
@@ -4864,7 +4768,6 @@ description = "text preprocess."
 optional = false
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "proces-0.1.7-py3-none-any.whl", hash = "sha256:308325bbc96877263f06e57e5e9c760c4b42cc722887ad60be6b18fc37d68762"},
     {file = "proces-0.1.7.tar.gz", hash = "sha256:70a05d9e973dd685f7a9092c58be695a8181a411d63796c213232fd3fdc43775"},
@@ -5184,7 +5087,6 @@ description = "Simple LaTeX parser providing latex-to-unicode and unicode-to-lat
 optional = false
 python-versions = "*"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "pylatexenc-2.10.tar.gz", hash = "sha256:3dd8fd84eb46dc30bee1e23eaab8d8fb5a7f507347b23e5f38ad9675c84f40d3"},
 ]
@@ -5244,7 +5146,6 @@ description = "汉字拼音转换模块/工具."
 optional = false
 python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,<4,>=2.6"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "pypinyin-0.53.0-py2.py3-none-any.whl", hash = "sha256:a906768919da3c31771f2c5e0e5a759214dc38d0087e15e6ff67649e03df8097"},
     {file = "pypinyin-0.53.0.tar.gz", hash = "sha256:a2d39ddc2bd31b55897bbb10d2e11a0c4d399988a97c00ad489c151afd9b106d"},
@@ -5257,7 +5158,6 @@ description = "使用 pinyin-data 和 phrase-pinyin-data 中的拼音数据文�
 optional = false
 python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,<4,>=2.6"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "pypinyin_dict-0.9.0-py2.py3-none-any.whl", hash = "sha256:10cfbe40af87d704b867533177be8cd72837da9e224755dd275798e88097067a"},
     {file = "pypinyin_dict-0.9.0.tar.gz", hash = "sha256:8c491396baa1567311f2ec759cbc154638f3bcefdc711d34e53e373e3a429fa5"},
@@ -5431,26 +5331,12 @@ torchaudio = "*"
 transformers = "4.57.3"
 
 [[package]]
-name = "razdel"
-version = "0.5.0"
-description = "Splits russian text into tokens, sentences, section. Rule-based"
-optional = true
-python-versions = "*"
-groups = ["main"]
-markers = "extra == \"stress\""
-files = [
-    {file = "razdel-0.5.0-py3-none-any.whl", hash = "sha256:76f59691c3216b47d32fef6274c18c12d61f602f1444b7ef4b135b03801f6d37"},
-    {file = "razdel-0.5.0.tar.gz", hash = "sha256:4334c0fdfe34d4e888cf0ed854968c9df14f0a547df909a77f4634f9ffe626e6"},
-]
-
-[[package]]
 name = "rdflib"
 version = "7.1.3"
 description = "RDFLib is a Python library for working with RDF, a simple yet powerful language for representing information."
 optional = false
 python-versions = "<4.0.0,>=3.8.1"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "rdflib-7.1.3-py3-none-any.whl", hash = "sha256:5402310a9f0f3c07d453d73fd0ad6ba35616286fe95d3670db2b725f3f539673"},
     {file = "rdflib-7.1.3.tar.gz", hash = "sha256:f3dcb4c106a8cd9e060d92f43d593d09ebc3d07adc244f4c7315856a12e383ee"},
@@ -5633,7 +5519,6 @@ description = "Validating URI References per RFC 3986"
 optional = false
 python-versions = "*"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "rfc3986-1.5.0-py2.py3-none-any.whl", hash = "sha256:a86d6e1f5b1dc238b218b012df0aa79409667bb209e58da56d0b94704e712a97"},
     {file = "rfc3986-1.5.0.tar.gz", hash = "sha256:270aaf10d87d0d4e095063c65bf3ddbc6ee3d0b226328ce21e036f946e421835"},
@@ -5754,29 +5639,6 @@ files = [
     {file = "rpds_py-0.22.3-pp39-pypy39_pp73-win_amd64.whl", hash = "sha256:5246b14ca64a8675e0a7161f7af68fe3e910e6b90542b4bfb5439ba752191df6"},
     {file = "rpds_py-0.22.3.tar.gz", hash = "sha256:e32fee8ab45d3c2db6da19a5323bc3362237c8b653c70194414b892fd06a080d"},
 ]
-
-[[package]]
-name = "ruaccent"
-version = "1.6.0"
-description = "A Russian text accentuation tool"
-optional = true
-python-versions = ">=3.9"
-groups = ["main"]
-markers = "extra == \"stress\""
-files = [
-    {file = "ruaccent-1.6.0-py3-none-any.whl", hash = "sha256:a6fa90b5dec9edb0a2ed3068fba0f320e31c15c590009e4a86210db1436297cc"},
-    {file = "ruaccent-1.6.0.tar.gz", hash = "sha256:88b1c08ef53827cf3384303d43e259b2570eed412ccd9b5c5e01fc7de0a2b3e1"},
-]
-
-[package.dependencies]
-huggingface_hub = ">=0.23"
-numpy = "*"
-onnxruntime = "*"
-razdel = "*"
-transformers = ">=4.30"
-
-[package.extras]
-test = ["pytest"]
 
 [[package]]
 name = "safetensors"
@@ -6086,7 +5948,6 @@ description = ""
 optional = false
 python-versions = "*"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "segments-2.2.1-py2.py3-none-any.whl", hash = "sha256:069860ae5a499ad7bd86e23ee52250a16e61ba3474c17e515b16d494ac1423c1"},
     {file = "segments-2.2.1.tar.gz", hash = "sha256:515ae188f21d24e420d48ad45689edc747d961d6b52fde22e47500a8d85f2741"},
@@ -6157,7 +6018,6 @@ description = "Utils for streaming large files (S3, HDFS, GCS, Azure Blob Storag
 optional = false
 python-versions = "<4.0,>=3.7"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "smart_open-7.1.0-py3-none-any.whl", hash = "sha256:4b8489bb6058196258bafe901730c7db0dcf4f083f316e97269c66f45502055b"},
     {file = "smart_open-7.1.0.tar.gz", hash = "sha256:a4f09f84f0f6d3637c6543aca7b5487438877a21360e7368ccf1f704789752ba"},
@@ -6280,7 +6140,6 @@ description = "Industrial-strength Natural Language Processing (NLP) in Python"
 optional = false
 python-versions = "<3.13,>=3.9"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "spacy-3.8.4-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:bbe074f58ac21156dab821b5a145f72c2a50933098bc371ab5a63f47e8ac5fc6"},
     {file = "spacy-3.8.4-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:d0474188edcdad2be647df04cfdc4351dea877caf41bd8c93b36e3b9124794c7"},
@@ -6354,7 +6213,6 @@ description = "Curated transformer models for spaCy pipelines"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "spacy_curated_transformers-0.3.0-py2.py3-none-any.whl", hash = "sha256:ddfd33e81b53ad798dac841ab022189f9543718ff874eda1081fce6ff93de377"},
     {file = "spacy_curated_transformers-0.3.0.tar.gz", hash = "sha256:989a6bf2aa7becd1ac8c3be5f245cd489223d4e16e7218f6b69479c7e2689937"},
@@ -6372,7 +6230,6 @@ description = "Legacy registered functions for spaCy backwards compatibility"
 optional = false
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "spacy-legacy-3.0.12.tar.gz", hash = "sha256:b37d6e0c9b6e1d7ca1cf5bc7152ab64a4c4671f59c85adaf7a3fcb870357a774"},
     {file = "spacy_legacy-3.0.12-py2.py3-none-any.whl", hash = "sha256:476e3bd0d05f8c339ed60f40986c07387c0a71479245d6d0f4298dbd52cda55f"},
@@ -6385,7 +6242,6 @@ description = "Logging utilities for SpaCy"
 optional = false
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "spacy-loggers-1.0.5.tar.gz", hash = "sha256:d60b0bdbf915a60e516cc2e653baeff946f0cfc461b452d11a4d5458c6fe5f24"},
     {file = "spacy_loggers-1.0.5-py3-none-any.whl", hash = "sha256:196284c9c446cc0cdb944005384270d775fdeaf4f494d8e269466cfa497ef645"},
@@ -6398,7 +6254,6 @@ description = "Modern high-performance serialization utilities for Python"
 optional = false
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "srsly-2.4.8-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:17f3bcb418bb4cf443ed3d4dcb210e491bd9c1b7b0185e6ab10b6af3271e63b2"},
     {file = "srsly-2.4.8-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:0b070a58e21ab0e878fd949f932385abb4c53dd0acb6d3a7ee75d95d447bc609"},
@@ -6438,52 +6293,6 @@ files = [
 
 [package.dependencies]
 catalogue = ">=2.0.3,<2.1.0"
-
-[[package]]
-name = "standard-aifc"
-version = "3.13.0"
-description = "Standard library aifc redistribution. \"dead battery\"."
-optional = false
-python-versions = "*"
-groups = ["main"]
-markers = "python_version == \"3.13\""
-files = [
-    {file = "standard_aifc-3.13.0-py3-none-any.whl", hash = "sha256:f7ae09cc57de1224a0dd8e3eb8f73830be7c3d0bc485de4c1f82b4a7f645ac66"},
-    {file = "standard_aifc-3.13.0.tar.gz", hash = "sha256:64e249c7cb4b3daf2fdba4e95721f811bde8bdfc43ad9f936589b7bb2fae2e43"},
-]
-
-[package.dependencies]
-audioop-lts = {version = "*", markers = "python_version >= \"3.13\""}
-standard-chunk = {version = "*", markers = "python_version >= \"3.13\""}
-
-[[package]]
-name = "standard-chunk"
-version = "3.13.0"
-description = "Standard library chunk redistribution. \"dead battery\"."
-optional = false
-python-versions = "*"
-groups = ["main"]
-markers = "python_version == \"3.13\""
-files = [
-    {file = "standard_chunk-3.13.0-py3-none-any.whl", hash = "sha256:17880a26c285189c644bd5bd8f8ed2bdb795d216e3293e6dbe55bbd848e2982c"},
-    {file = "standard_chunk-3.13.0.tar.gz", hash = "sha256:4ac345d37d7e686d2755e01836b8d98eda0d1a3ee90375e597ae43aaf064d654"},
-]
-
-[[package]]
-name = "standard-sunau"
-version = "3.13.0"
-description = "Standard library sunau redistribution. \"dead battery\"."
-optional = false
-python-versions = "*"
-groups = ["main"]
-markers = "python_version == \"3.13\""
-files = [
-    {file = "standard_sunau-3.13.0-py3-none-any.whl", hash = "sha256:53af624a9529c41062f4c2fd33837f297f3baa196b0cfceffea6555654602622"},
-    {file = "standard_sunau-3.13.0.tar.gz", hash = "sha256:b319a1ac95a09a2378a8442f403c66f4fd4b36616d6df6ae82b8e536ee790908"},
-]
-
-[package.dependencies]
-audioop-lts = {version = "*", markers = "python_version >= \"3.13\""}
 
 [[package]]
 name = "starlette"
@@ -6544,7 +6353,6 @@ description = "A refreshing functional take on deep learning, compatible with yo
 optional = false
 python-versions = "<3.13,>=3.9"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "thinc-8.3.4-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:916ea79a7c7462664be9435679b7769b4fc1ecea3886db6da6118e4eb5cc8c8b"},
     {file = "thinc-8.3.4-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:6c985ce9cf82a611f4f348c721372d073537ca0e8b7bbb8bd865c1598ddd79d1"},
@@ -6926,7 +6734,6 @@ description = "Typer, build great CLIs. Easy to code. Based on Python type hints
 optional = false
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "typer-0.7.0-py3-none-any.whl", hash = "sha256:b5e704f4e48ec263de1c0b3a2387cd405a13767d2f907f44c1a08cbad96f606d"},
     {file = "typer-0.7.0.tar.gz", hash = "sha256:ff797846578a9f2a201b53442aedeb543319466870fbe1c701eab66dd7681165"},
@@ -6986,7 +6793,6 @@ description = "Implementation of RFC 6570 URI Templates"
 optional = false
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "uritemplate-4.1.1-py2.py3-none-any.whl", hash = "sha256:830c08b8d99bdd312ea4ead05994a38e8936266f84b9a7878232db50b044e02e"},
     {file = "uritemplate-4.1.1.tar.gz", hash = "sha256:4346edfc5c3b79f694bccd6d6099a322bbeb628dbf2cd86eea55a456ce5124f0"},
@@ -7037,7 +6843,6 @@ description = "A lightweight console printing and formatting toolkit"
 optional = false
 python-versions = "*"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "wasabi-0.10.1-py3-none-any.whl", hash = "sha256:fe862cc24034fbc9f04717cd312ab884f71f51a8ecabebc3449b751c2a649d83"},
     {file = "wasabi-0.10.1.tar.gz", hash = "sha256:c8e372781be19272942382b14d99314d175518d7822057cb7a97010c4259d249"},
@@ -7050,7 +6855,6 @@ description = "Weasel: A small and easy workflow system"
 optional = false
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "weasel-0.4.1-py3-none-any.whl", hash = "sha256:24140a090ea1ac512a2b2f479cc64192fd1d527a7f3627671268d08ed5ac418c"},
     {file = "weasel-0.4.1.tar.gz", hash = "sha256:aabc210f072e13f6744e5c3a28037f93702433405cd35673f7c6279147085aa9"},
@@ -7359,7 +7163,7 @@ description = "A small Python utility to set file creation time on Windows"
 optional = false
 python-versions = ">=3.5"
 groups = ["main"]
-markers = "sys_platform == \"win32\" and python_version < \"3.13\""
+markers = "sys_platform == \"win32\""
 files = [
     {file = "win32_setctime-1.2.0-py3-none-any.whl", hash = "sha256:95d644c4e708aba81dc3704a116d8cbc974d70b3bdb8be1d150e36be6e9d1390"},
     {file = "win32_setctime-1.2.0.tar.gz", hash = "sha256:ae1fdf948f5640aae05c511ade119313fb6a30d7eabe25fef9764dca5873c4c0"},
@@ -7402,7 +7206,6 @@ description = "Module for decorators, wrappers and monkey patching."
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "python_version < \"3.13\""
 files = [
     {file = "wrapt-1.17.2-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:3d57c572081fed831ad2d26fd430d565b76aa277ed1d30ff4d40670b1c0dd984"},
     {file = "wrapt-1.17.2-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:b5e251054542ae57ac7f3fba5d10bfff615b6c2fb09abeb37d2f1463f841ae22"},
@@ -7686,9 +7489,8 @@ propcache = ">=0.2.1"
 [extras]
 asr = ["faster-whisper"]
 gui = ["pillow", "wxpython"]
-stress = ["ruaccent"]
 
 [metadata]
 lock-version = "2.1"
-python-versions = ">=3.10,<3.14"
-content-hash = "06f5d08e0a1222518a42bee76e1dd15ff7c04153d768a5d4b505f3fd07784fd3"
+python-versions = ">=3.10,<3.13"
+content-hash = "ca41d4f9abd863bd3e21d650a7d371eff6f2a41342b52ea5f3391b0628001b62"

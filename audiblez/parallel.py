@@ -1,166 +1,157 @@
 # -*- coding: utf-8 -*-
 """
-Parallel synthesis on several GPUs (e.g. Kaggle's free "GPU T4 x2").
+Parallel synthesis on several devices (e.g. the two T4 GPUs of a Kaggle notebook): one worker process per device,
+each with its own model, pulling batches of chunks from a shared queue and writing them to the shared cache.
 
-The chunks still to synthesize are split into balanced shards (by number of letters, longest first). Each shard is
-synthesized by its own worker process, pinned to one GPU with CUDA_VISIBLE_DEVICES, which loads its own copy of the
-models and runs the usual synthesis + quality checks + retries, writing into the same cache folder as a single-GPU
-run. The coordinator then assembles the chapters from the cache. Since everything goes through the cache, a crashed
-worker only costs its unfinished chunks (the coordinator synthesizes them itself), and an interrupted run resumes.
-
-    python -m audiblez.parallel JOB.json     (started by audiblez itself)
+Workers are started with the 'spawn' method (required for CUDA). If a worker cannot start or crashes, the other
+ones keep going, and whatever is still missing at the end is synthesized by the caller.
 """
-import json
+import dataclasses
+import multiprocessing as mp
 import os
-import subprocess
-import sys
-import threading
+import queue
 import time
-from dataclasses import asdict
-from pathlib import Path
+import traceback
 
-MIN_CHUNKS_PER_WORKER = 8  # below this, loading one more copy of the models is not worth it
+from audiblez.text import count_letters
 
 
-def visible_gpus():
-    """Physical ids of the CUDA GPUs visible to this process (honours CUDA_VISIBLE_DEVICES)."""
+def resolve_devices(gpus, engine_name, device='auto'):
+    """
+    '--gpus' value -> list of devices for parallel workers, or None for a single in-process engine.
+    'auto': every visible CUDA GPU when there are at least two (Qwen3-TTS only).
+    """
+    if engine_name != 'qwen':
+        return None
+    spec = str(gpus or 'auto').strip().lower()
+    if spec in ('off', 'none', 'single', 'no', 'false'):
+        return None
+    if spec == 'auto':
+        if device not in ('auto', 'cuda'):
+            return None
+        try:
+            import torch
+            n = torch.cuda.device_count() if torch.cuda.is_available() else 0
+        except Exception:
+            n = 0
+        return [f'cuda:{i}' for i in range(n)] if n > 1 else None
+    if spec == 'all':
+        import torch
+        n = torch.cuda.device_count() if torch.cuda.is_available() else 0
+        return [f'cuda:{i}' for i in range(n)] or None
+    devices = []
+    for part in spec.split(','):
+        part = part.strip()
+        if not part:
+            continue
+        devices.append(f'cuda:{part}' if part.isdigit() else part)
+    return devices or None
+
+
+def _worker(wid, device, n_workers, choice, settings, work_dir, language, task_q, result_q):
+    """Worker process: load the engine on `device`, then synthesize batches until the sentinel (None)."""
     try:
         import torch
-        count = torch.cuda.device_count() if torch.cuda.is_available() else 0
-    except Exception:
-        return []
-    env = os.environ.get('CUDA_VISIBLE_DEVICES')
-    if env is not None and env.strip():
-        ids = [x.strip() for x in env.split(',') if x.strip()]
-        return ids[:count]
-    return [str(i) for i in range(count)]
-
-
-def plan_workers(settings, engine, n_chunks):
-    """Number of parallel GPU workers to use (1 = synthesize in this process)."""
-    if not getattr(engine, 'stochastic', False) or not str(getattr(engine, 'device', '')).startswith('cuda'):
-        return 1
-    if str(getattr(engine, 'device', '')) not in ('cuda', 'cuda:0'):
-        return 1  # an explicit device such as cuda:1 was requested
-    wanted = str(settings.gpus or 'auto').strip().lower()
-    gpus = visible_gpus()
-    if wanted == 'auto':
-        n = len(gpus)
-    else:
+        if device.startswith('cpu'):
+            torch.set_num_threads(max(1, (os.cpu_count() or 2) // n_workers))
+        elif device.startswith('cuda'):
+            torch.cuda.set_device(torch.device(device))
+        from audiblez import core
+        settings = dataclasses.replace(settings, device=device)
+        engine = core.create_engine(choice, settings)
+        verifier = core.make_verifier(engine, language, settings, log=lambda m: None)
+        synth = core.Synthesizer(engine, work_dir, settings, verifier=verifier, language=language,
+                                 log=lambda m: result_q.put(('log', wid, m)), progress=False)
+        result_q.put(('ready', wid, engine.describe()))
+    except BaseException as e:  # noqa: B036 - report every failure to the parent
+        result_q.put(('error', wid, f'{type(e).__name__}: {e}\n{traceback.format_exc()[-2000:]}'))
+        return
+    while True:
+        item = task_q.get()
+        if item is None:
+            break
+        label, texts = item
+        before = len(synth.report)
+        s0 = (synth.stats.synth_seconds, synth.stats.synth_audio)
         try:
-            n = int(wanted)
-        except ValueError:
-            raise SystemExit(f'--gpus must be "auto" or a number, not "{settings.gpus}"')
-        if n > len(gpus):
-            print(f'\033[93m--gpus {n}: only {len(gpus)} CUDA GPU(s) visible, using {len(gpus)}.\033[0m')
-            n = len(gpus)
-    return max(1, min(n, n_chunks // MIN_CHUNKS_PER_WORKER))
+            synth.synthesize(texts, label)
+        except BaseException as e:  # noqa: B036
+            result_q.put(('failed', wid, dict(error=f'{type(e).__name__}: {e}', texts=texts,
+                                                 trace=traceback.format_exc()[-2000:])))
+            break  # a CUDA error usually leaves the process unusable: let the others (and the caller) finish
+        result_q.put(('done', wid, dict(chars=sum(len(t) for t in texts), letters=sum(map(count_letters, texts)),
+                                           seconds=synth.stats.synth_seconds - s0[0],
+                                           audio=synth.stats.synth_audio - s0[1],
+                                           failures=synth.report[before:])))
+    result_q.put(('exit', wid, None))
 
 
-def split_balanced(todo: dict, n):
-    """Split {text: label} into n shards of about the same total length (longest-processing-time-first)."""
-    from audiblez.text import count_letters
-    shards = [dict() for _ in range(n)]
-    loads = [0] * n
-    for text in sorted(todo, key=lambda t: (-count_letters(t), t)):
-        i = min(range(n), key=lambda k: (loads[k], k))
-        shards[i][text] = todo[text]
-        loads[i] += count_letters(text) + 20  # + a constant: every chunk also has a fixed cost
-    return shards
-
-
-def _settings_dict(settings):
-    d = asdict(settings)
-    d['formats'] = list(d.get('formats') or ())
-    return d
-
-
-def write_jobs(gpus, todo: dict, choice, settings, work_dir, deadline=None):
-    """One job file per GPU with its balanced share of the {text: label} chunks. Returns [(gpu, job_path)]."""
-    jobs_dir = Path(work_dir) / 'jobs'
-    jobs_dir.mkdir(parents=True, exist_ok=True)
-    shards = split_balanced(todo, len(gpus))
-    print(f'Parallel synthesis on {len(gpus)} GPUs: ' +
-          ', '.join(f'GPU {g}: {len(s)} chunks' for g, s in zip(gpus, shards)))
-    jobs = []
-    for i, (gpu, shard) in enumerate(zip(gpus, shards)):
-        job = dict(worker=i, gpu=gpu, choice=choice, settings=_settings_dict(settings), work_dir=str(work_dir),
-                   deadline=deadline, todo=[[t, label] for t, label in shard.items()])
-        job_path = jobs_dir / f'worker_{i}.json'
-        job_path.write_text(json.dumps(job, ensure_ascii=False), encoding='utf-8')
-        jobs.append((gpu, job_path))
-    return jobs
-
-
-def run_workers(n, todo: dict, choice, settings, work_dir, deadline=None):
-    """Synthesize the {text: label} chunks with n worker processes, one per GPU. Blocks until they all exit."""
-    jobs_dir = Path(work_dir) / 'jobs'
-    procs = []
-    for i, (gpu, job_path) in enumerate(write_jobs(visible_gpus()[:n], todo, choice, settings, work_dir, deadline)):
-        env = dict(os.environ, CUDA_VISIBLE_DEVICES=gpu, PYTHONUNBUFFERED='1', PYTHONIOENCODING='utf-8')
-        proc = subprocess.Popen([sys.executable, '-m', 'audiblez.parallel', str(job_path)], env=env,
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8',
-                                errors='replace', bufsize=1)
-        log = open(jobs_dir / f'worker_{i}.log', 'a', encoding='utf-8')
-        thread = threading.Thread(target=_relay, args=(proc, f'[GPU {gpu}] ', log), daemon=True)
-        thread.start()
-        procs.append((gpu, proc, thread, log))
-    failed = []
-    try:
-        for gpu, proc, thread, log in procs:
-            code = proc.wait()
-            thread.join()
-            log.close()
-            if code != 0:
-                failed.append(gpu)
-    except KeyboardInterrupt:
-        for _, proc, _, _ in procs:
-            proc.terminate()
-        raise
-    if failed:
-        print(f'\033[93mWorker(s) on GPU {", ".join(failed)} stopped with an error (log in {jobs_dir}); their '
-              f'remaining chunks are synthesized by the main process.\033[0m')
-    return not failed
-
-
-def _relay(proc, prefix, log):
-    for line in proc.stdout:
-        line = line.rstrip('\n')
-        print(prefix + line, flush=True)
-        log.write(line + '\n')
-
-
-def worker_main(job_path):
-    job = json.loads(Path(job_path).read_text(encoding='utf-8'))
-    from types import SimpleNamespace
-    from audiblez.core import Settings, Synthesizer, create_engine, make_verifier
-    fields = Settings.__dataclass_fields__
-    settings = Settings(**{k: v for k, v in job['settings'].items() if k in fields})
-    settings.formats = tuple(settings.formats)
-    settings.gpus = '1'
-    if str(settings.device).startswith('cuda') or settings.device == 'auto':
-        settings.device = 'cuda'  # the GPU given by CUDA_VISIBLE_DEVICES
-    todo = {t: label for t, label in job['todo']}
-    factory = os.environ.get('AUDIBLEZ_WORKER_ENGINE')  # "module:function(choice, settings)", used by the tests
-    if factory:
-        import importlib
-        module, _, func = factory.partition(':')
-        engine = getattr(importlib.import_module(module), func)(job['choice'], settings)
-    else:
-        engine = create_engine(job['choice'], settings)
-    verifier = make_verifier(settings, engine, job['choice']['language'])
-    stats = SimpleNamespace(total_chars=sum(len(t) for t in todo), processed_chars=0, synth_chars=0,
-                            synth_seconds=0.0, audio_seconds=0.0, chars_per_sec=400, progress=0, eta='?')
-    synth = Synthesizer(engine, Path(job['work_dir']), settings, stats, verifier=verifier,
-                        worker_id=f'w{job["worker"]}')
-    t0 = time.time()
-    complete = synth.synthesize_texts(todo, job.get('deadline'))
-    speed = stats.audio_seconds / stats.synth_seconds if stats.synth_seconds else 0.0
-    print(f'Worker done in {time.time() - t0:.0f}s: {stats.audio_seconds / 60:.1f} min of audio, {speed:.2f}x real '
-          f'time' + ('' if complete else ' (stopped by the time limit)'))
-
-
-if __name__ == '__main__':
-    from audiblez import ensure_utf8_stdio
-    ensure_utf8_stdio()
-    worker_main(sys.argv[1])
+def synthesize_parallel(devices, choice, settings, work_dir, language, jobs, total_chars, already_done=0,
+                        log=print, post_event=None, stats=None):
+    """
+    jobs: list of (label, texts) still to synthesize. Returns the QA report entries of chunks that failed.
+    """
+    from audiblez.core import strfdelta
+    bs = int(settings.batch_size or 0) or 4
+    tasks = []
+    for label, texts in jobs:
+        ordered = sorted(dict.fromkeys(texts), key=len, reverse=True)
+        tasks += [(label, ordered[i:i + bs]) for i in range(0, len(ordered), bs)]
+    tasks.sort(key=lambda t: -sum(len(x) for x in t[1]))  # longest batches first: better load balance at the end
+    if not tasks:
+        return []
+    ctx = mp.get_context('spawn')
+    task_q, result_q = ctx.Queue(), ctx.Queue()
+    for t in tasks:
+        task_q.put(t)
+    for _ in devices:
+        task_q.put(None)
+    # Worker ids are unique even when a device hosts several workers ("--gpus 0,0" on a large GPU)
+    procs = {f'{d}#{i}': ctx.Process(target=_worker, args=(f'{d}#{i}', d, len(devices), choice, settings,
+                                                           str(work_dir), language, task_q, result_q), daemon=True)
+             for i, d in enumerate(devices)}
+    log(f'Starting {len(devices)} parallel workers on {", ".join(devices)} ({len(tasks)} batches of up to {bs} chunks)')
+    for p in procs.values():
+        p.start()
+    finished, report = set(), []
+    done_chars, synth_audio, t_start = already_done, 0.0, time.time()
+    while len(finished) < len(procs):
+        try:
+            kind, device, payload = result_q.get(timeout=10)
+        except queue.Empty:
+            for d, p in procs.items():
+                if d not in finished and not p.is_alive():
+                    log(f'\033[91mWorker {d} stopped unexpectedly (exit code {p.exitcode}).\033[0m')
+                    finished.add(d)
+            continue
+        if kind == 'ready':
+            log(f'Worker {device} ready: {payload}')
+        elif kind == 'log':
+            log(f'[{device}] {payload}')
+        elif kind == 'error':
+            log(f'\033[91mWorker {device} could not start: {payload}\033[0m')
+            finished.add(device)
+        elif kind == 'failed':
+            log(f'\033[91mWorker {device} failed: {payload["error"]}\n{payload["trace"]}\033[0m')
+        elif kind == 'exit':
+            finished.add(device)
+        elif kind == 'done':
+            report += payload['failures']
+            done_chars += payload['chars']
+            synth_audio += payload['audio']
+            elapsed = time.time() - t_start
+            rate = (done_chars - already_done) / max(elapsed, 1e-6)
+            eta = strfdelta((total_chars - done_chars) / max(rate, 1e-6))
+            pct = min(100, done_chars * 100 // max(1, total_chars))
+            speed = synth_audio / max(elapsed, 1e-6)
+            log(f'Progress: {pct}%  |  {rate:.{0 if rate >= 10 else 1}f} chars/s  |  {speed:.2f}x real time '
+                f'(all workers)  |  ETA {eta}')
+            if stats is not None:
+                stats.processed_chars, stats.progress, stats.eta = done_chars, pct, eta
+                if post_event:
+                    post_event('CORE_PROGRESS', stats=stats)
+    for p in procs.values():
+        p.join(timeout=30)
+        if p.is_alive():
+            p.terminate()
+    return report

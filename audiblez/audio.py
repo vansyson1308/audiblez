@@ -159,57 +159,6 @@ def silence(seconds, sr):
     return np.zeros(int(round(max(0.0, seconds) * sr)), dtype=np.float32)
 
 
-def estimate_noise_floor(audios, sr):
-    """
-    Level (dBFS) of the background inside the pauses of the synthesized chunks, i.e. the "room tone" of the voice
-    (about -65 dBFS for Qwen3-TTS, ~48 dB under the speech). None when it cannot be measured (e.g. clean synthetic
-    tones in the tests, or a model that outputs digital silence).
-    """
-    quiet = []
-    for a in audios:
-        db, _ = _frame_db(np.asarray(a, dtype=np.float32), sr)
-        if len(db) >= 20:
-            q = db[(db <= _silence_threshold_db(db)) & (db > -110.0)]
-            quiet.append(q)
-    quiet = np.concatenate(quiet) if quiet else np.zeros(0)
-    if len(quiet) < 30:
-        return None
-    return float(np.clip(np.median(quiet), -85.0, -55.0))
-
-
-class RoomTone:
-    """
-    Pauses filled with a soft (pink) noise at the level of the voice's own background, instead of digital silence:
-    the background no longer switches off between sentences (audible "gating" on headphones), as audiobook
-    standards require (ACX: room tone, not digital silence, in the pauses).
-    """
-
-    def __init__(self, level_db, sr, seed=0, seconds=8.0):
-        self.sr = sr
-        rng = np.random.default_rng(seed)
-        n = int(seconds * sr)
-        spectrum = np.fft.rfft(rng.standard_normal(n))
-        f = np.fft.rfftfreq(n, 1.0 / sr)
-        spectrum[1:] /= np.sqrt(f[1:] / f[1])  # 1/f power: pink noise
-        spectrum[0] = 0.0
-        spectrum[f < 40.0] = 0.0  # no rumble
-        noise = np.fft.irfft(spectrum, n)
-        noise *= 10 ** (level_db / 20) / (np.sqrt(np.mean(noise ** 2)) + 1e-12)
-        self.buffer = noise.astype(np.float32)
-        self.pos = int(rng.integers(0, n))
-
-    def __call__(self, seconds):
-        n = int(round(max(0.0, seconds) * self.sr))
-        out = np.empty(n, dtype=np.float32)
-        done = 0
-        while done < n:
-            k = min(n - done, len(self.buffer) - self.pos)
-            out[done:done + k] = self.buffer[self.pos:self.pos + k]
-            done += k
-            self.pos = (self.pos + k) % len(self.buffer)
-        return fade_edges(out, self.sr, 5, 5) if n else out
-
-
 # ---------------------------------------------------------------------------------------------------------------------
 # Quality checks
 # ---------------------------------------------------------------------------------------------------------------------
@@ -222,6 +171,8 @@ class QAResult:
     letters_per_sec: float = 0.0
     cer: Optional[float] = None
     transcript: Optional[str] = None
+    similarity: Optional[float] = None
+    rate_deviation: float = 0.0  # |log(speaking rate / typical rate of the language)|
 
     @property
     def score(self):
@@ -229,9 +180,9 @@ class QAResult:
         s = 0.0 if self.ok else 1.0
         if self.cer is not None:
             s += self.cer
-        if self.letters_per_sec:
-            s += abs(np.log(max(self.letters_per_sec, 0.1) / 12.0)) * 0.2
-        return s
+        if self.similarity is not None:
+            s += max(0.0, 1.0 - self.similarity) * 0.5
+        return s + 0.2 * self.rate_deviation
 
 
 @dataclass
@@ -239,6 +190,11 @@ class QAConfig:
     min_rate: float = 5.0   # letters per second below which the take is suspicious (hallucination / looping)
     max_rate: float = 25.0  # letters per second above which words were probably skipped
     max_cer: float = 0.25   # maximum character error rate against the ASR transcript
+    # Minimum cohort-centered speaker similarity with the reference voice (voice cloning, see
+    # QwenEngine.speaker_similarity). Correct takes measured 0.38-0.81 in Russian, Japanese and Korean (0.26+ on
+    # 1.2 s excerpts), takes in another gender's voice below -0.08: 0.15 catches a voice flip without regenerating
+    # good takes.
+    min_similarity: float = 0.15
     max_retries: int = 3
 
 
@@ -264,14 +220,59 @@ def analyze_chunk(wav, sr, text, qa: QAConfig, raw_wav=None, hit_token_limit=Fal
         peak = float(np.max(np.abs(src)))
         if peak >= 0.999 and float(np.mean(np.abs(src) >= 0.999)) > 0.001:
             reasons.append('clipping')
-    return QAResult(ok=not reasons, reasons=reasons, duration=duration, letters_per_sec=rate)
+    typical = (qa.min_rate * qa.max_rate) ** 0.5  # geometric middle of the accepted range
+    deviation = abs(float(np.log(max(rate, 0.1) / typical))) if letters >= 12 and duration > 0 else 0.0
+    return QAResult(ok=not reasons, reasons=reasons, duration=duration, letters_per_sec=rate, rate_deviation=deviation)
 
 
-def _normalize_for_cer(text):
-    text = text.replace('\u0301', '').replace('\u0300', '')  # stress marks (--stress) are not letters
+_JA_TAGGER = None
+
+
+def _to_katakana(text):
+    return ''.join(chr(ord(c) + 0x60) if 'ぁ' <= c <= 'ゖ' else c for c in text)
+
+
+def japanese_reading(text):
+    """Katakana reading of a Japanese text (pyopenjtalk, else fugashi + unidic-lite), to compare a Whisper transcript
+    with the source fairly: Whisper writes 颯 where the text says はやて, and writes the right kanji even when the TTS
+    misread them, so only a comparison of readings is meaningful."""
+    from audiblez.normalize_ja import reading
+    kana = reading(text)
+    if kana:
+        return _to_katakana(kana)
+    global _JA_TAGGER
+    if _JA_TAGGER is None:
+        try:
+            import fugashi
+            _JA_TAGGER = fugashi.Tagger()
+        except Exception:
+            _JA_TAGGER = False
+    if _JA_TAGGER:
+        try:
+            text = ''.join((getattr(w.feature, 'kana', None) or w.surface) for w in _JA_TAGGER(text))
+        except Exception:
+            pass
+    return _to_katakana(text)
+
+
+def _normalize_for_cer(text, lang='en'):
+    lang = (lang or 'en')[:2]
     text = text.lower().replace('ё', 'е')
+    if lang == 'ja':
+        text = japanese_reading(text)
     text = re.sub(r'[^\w\s]|_', ' ', text)
+    if lang in ('ja', 'zh', 'ko'):  # spacing is not meaningful for the comparison (Korean spacing varies a lot)
+        return re.sub(r'\s+', '', text)
     return re.sub(r'\s+', ' ', text).strip()
+
+
+def ending_is_missing(reference, hypothesis, lang='en'):
+    """True if the last syllables of the text are not heard at the end of the transcript (clipped ending)."""
+    lang = (lang or 'en')[:2]
+    ref, hyp = _normalize_for_cer(reference, lang), _normalize_for_cer(hypothesis, lang)
+    n = 2 if lang in ('ja', 'zh', 'ko') else 3
+    tail = ref[-n:]
+    return bool(tail) and len(ref) >= 8 and tail not in hyp[-(n + 4):]
 
 
 def levenshtein(a, b):
@@ -288,42 +289,46 @@ def levenshtein(a, b):
     return previous[-1]
 
 
-def char_error_rate(reference, hypothesis):
-    ref, hyp = _normalize_for_cer(reference), _normalize_for_cer(hypothesis)
+def char_error_rate(reference, hypothesis, lang='en'):
+    ref, hyp = _normalize_for_cer(reference, lang), _normalize_for_cer(hypothesis, lang)
     if not ref:
         return 0.0 if not hyp else 1.0
     return levenshtein(ref, hyp) / len(ref)
 
 
+# Phrases Whisper invents on silence or short clips (trained on subtitled videos)
+_WHISPER_HALLUCINATIONS = [
+    'ご視聴ありがとうございました', 'ご視聴ありがとうございます', 'チャンネル登録', '字幕', '最後までご視聴',
+    '시청해주셔서 감사합니다', '시청해 주셔서 감사합니다', '구독과 좋아요', 'MBC 뉴스', 'KBS 뉴스', '자막',
+    'Субтитры', 'Редактор субтитров', 'Продолжение следует', 'Thanks for watching', 'Subtitles by',
+]
+
+
+def strip_whisper_hallucinations(transcript, reference):
+    for phrase in _WHISPER_HALLUCINATIONS:
+        if phrase in transcript and phrase not in reference:
+            transcript = transcript.replace(phrase, ' ')
+    return re.sub(r'\s{2,}', ' ', transcript).strip()
+
+
 class AsrVerifier:
     """Transcribes synthesized chunks with faster-whisper and measures the character error rate."""
 
-    def __init__(self, language, model_size=None, device='auto'):
-        import importlib.util
-        if importlib.util.find_spec('faster_whisper') is None:
-            raise ImportError('faster-whisper is not installed')
-        self.model_size = model_size
-        self.device = device
+    def __init__(self, language, model_size=None, device='auto', log=print):
+        from faster_whisper import WhisperModel
+        import torch
+        device = str(device or 'auto')
+        if device == 'auto':
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        kind, _, index = device.partition(':')  # "cuda:1" -> GPU 1 (one Whisper per worker GPU)
+        if kind != 'cuda' or not torch.cuda.is_available():
+            kind, index = 'cpu', ''
+        if model_size is None:
+            model_size = 'large-v3-turbo' if kind == 'cuda' else 'small'
+        compute_type = 'float16' if kind == 'cuda' else 'int8'
+        log(f'Loading Whisper {model_size} on {device if kind == "cuda" else "cpu"} for automatic quality control...')
+        self.model = WhisperModel(model_size, device=kind, device_index=int(index or 0), compute_type=compute_type)
         self.language = (language or 'en')[:2]
-        self._model = None  # loaded on first use: nothing to load when every chunk comes from the cache
-
-    @property
-    def model(self):
-        if self._model is None:
-            from faster_whisper import WhisperModel
-            import torch
-            device = self.device or 'auto'
-            if device == 'auto':
-                device = 'cuda' if torch.cuda.is_available() else 'cpu'
-            device, _, index = device.partition(':')  # "cuda:1"
-            if device not in ('cuda', 'cpu'):
-                device = 'cpu'  # Apple MPS is not supported by CTranslate2
-            model_size = self.model_size or ('large-v3-turbo' if device == 'cuda' else 'small')
-            compute_type = 'float16' if device == 'cuda' else 'int8'
-            print(f'Loading Whisper {model_size} on {device} for automatic quality control...')
-            self._model = WhisperModel(model_size, device=device, device_index=int(index or 0),
-                                       compute_type=compute_type)
-        return self._model
 
     def transcribe(self, wav, sr):
         if sr != 16000:
@@ -336,16 +341,21 @@ class AsrVerifier:
     def check(self, wav, sr, text, qa: QAConfig, result: QAResult):
         if count_letters(text) < 20:  # Whisper itself is unreliable on very short clips
             return result
-        transcript = self.transcribe(wav, sr)
+        transcript = strip_whisper_hallucinations(self.transcribe(wav, sr), text)
         # Whisper writes "в 1812 году" while our text says "в тысяча восемьсот двенадцатом году": normalize both
         from audiblez.normalize import normalize_text
         try:
             heard = normalize_text(transcript, self.language)
         except Exception:
             heard = transcript
-        cer = char_error_rate(text, heard)
+        cer = char_error_rate(text, heard, self.language)
         result.cer, result.transcript = cer, transcript
-        if cer > qa.max_cer:
+        max_cer = qa.max_cer + (0.05 if self.language == 'ja' else 0.0)  # kanji/kana variants remain in ja
+        if cer > max_cer:
             result.ok = False
             result.reasons.append(f'ASR mismatch (CER {cer:.0%}): heard "{transcript[:120]}"')
+        elif ending_is_missing(text, heard, self.language):
+            result.ok = False
+            result.cer = max(cer, 0.15)
+            result.reasons.append(f'end of the sentence missing: heard "…{transcript[-30:]}"')
         return result
