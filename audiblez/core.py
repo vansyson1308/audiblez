@@ -927,10 +927,11 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
         slides = resolve_cues(load_slides(settings.slides), chapters, strict=not partial)
         print('Video slides:')
         for sl in slides:
-            where = ('0:00' if sl.chapter is None and sl is slides[0] else
-                     f'chapter {chapters[sl.chapter].index}: "{chapters[sl.chapter].segments[sl.segment].text[:60]}…"'
-                     if sl.chapter is not None else 'evenly spaced')
-            print(f'  {sl.image.name:24s} from {where}')
+            where = ('from 0:00' if sl.chapter is None and sl is slides[0] else
+                     f'from chapter {chapters[sl.chapter].index}: '
+                     f'"{chapters[sl.chapter].segments[sl.segment].text[:60]}…"'
+                     if sl.chapter is not None else 'halfway between its neighbours')
+            print(f'  {sl.image.name:24s} {where}')
     all_texts = [(c.title, s.text) for c in chapters for s in c.segments]
     total_chars = sum(len(t) for _, t in all_texts)
     est_hours = sum(textmod.count_letters(t) for _, t in all_texts) / profile['rate'] / 3600 / settings.speed
