@@ -52,6 +52,7 @@ class OutputOptions:
     episode_hours: Optional[float] = None
     cover_path: Optional[Path] = None
     keep_master: bool = False
+    slides: Optional[list] = None  # [(image path, start seconds in the audiobook timeline)] for the video (--slides)
 
 
 def _with_ext(base: Path, ext):
@@ -362,6 +363,46 @@ def encode_mp4(master_wav, out_path, image: Path, meta_path, duration, opts: Out
     _run(cmd)
 
 
+def _image_size(path):
+    """(width, height) of an image with ffprobe, (0, 0) if unknown."""
+    try:
+        p = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height',
+                            '-of', 'csv=p=0:s=x', str(path)], capture_output=True, text=True, timeout=60)
+        w, h = p.stdout.strip().split('x')[:2]
+        return int(w), int(h)
+    except Exception:
+        return 0, 0
+
+
+def encode_slideshow(master_wav, out_path, slides, meta_path, duration, opts: OutputOptions, work_dir):
+    """
+    .mp4 whose picture changes at the given times with a crossfade. slides: [(image, start seconds)], the first at 0.
+    The pictures are decoded once and repeated (the loop filter) at a low frame rate: a 2 h episode encodes in minutes.
+    """
+    from audiblez.slides import FPS, render_slide, slideshow_graph
+    work_dir = Path(work_dir)
+    rendered = {}
+    for image, _ in slides:
+        if image not in rendered:
+            rendered[image] = render_slide(image, work_dir / f'slide_{len(rendered):02d}.png', _run)
+    if len(slides) == 1:
+        return encode_mp4(master_wav, out_path, rendered[slides[0][0]], meta_path, duration, opts)
+    caps = ffmpeg_caps()
+    video = (['-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'stillimage', '-crf', '20'] if caps.libx264
+             else ['-c:v', 'mpeg4', '-q:v', '3'])
+    n = len(slides)
+    cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-stats', '-y']
+    for image, _ in slides:
+        cmd += ['-i', rendered[image]]
+    cmd += ['-i', master_wav, '-i', meta_path,
+            '-filter_complex', slideshow_graph([t for _, t in slides], duration),
+            '-map', '[vout]', '-map', f'{n}:a', '-map_metadata', str(n + 1), '-map_chapters', str(n + 1),
+            *video, '-pix_fmt', 'yuv420p', '-r', str(FPS), '-force_key_frames', 'expr:gte(t,n_forced*30)',
+            '-c:a', 'aac', '-b:a', opts.mp4_audio_bitrate, '-ac', '2', '-ar', str(opts.sample_rate),
+            '-t', f'{duration:.3f}', '-movflags', '+faststart', out_path]
+    _run(cmd)
+
+
 def export_audiobook(chapters: List[ChapterAudio], out_base: Path, title, author, cover_bytes, opts: OutputOptions,
                      language='en', part_label=None, log=print):
     """Master and encode the audiobook. Returns the list of written files."""
@@ -407,11 +448,20 @@ def export_audiobook(chapters: List[ChapterAudio], out_base: Path, title, author
                 encode_m4b(master, path, meta_path, cover, opts)
                 written.append(path)
             if 'mp4' in opts.formats:
-                if background is None:
-                    background = make_video_background(cover, title, author, tmp)
                 path = _with_ext(base, '.mp4')
-                log(f'Encoding {path.name} (YouTube video)...')
-                encode_mp4(master, path, background, meta_path, total, opts)
+                ep_slides = None
+                if opts.slides:
+                    from audiblez.slides import slides_for_episode
+                    ep_slides = slides_for_episode(opts.slides, [c.duration for c in chapters], pieces, opts.speed)
+                if ep_slides:
+                    shown = ', '.join(f'{format_timestamp(t, total >= 3600)} {Path(im).name}' for im, t in ep_slides)
+                    log(f'Encoding {path.name} (YouTube video, {len(ep_slides)} slides: {shown})...')
+                    encode_slideshow(master, path, ep_slides, meta_path, total, opts, tmp)
+                else:
+                    if background is None:
+                        background = make_video_background(cover, title, author, tmp)
+                    log(f'Encoding {path.name} (YouTube video)...')
+                    encode_mp4(master, path, background, meta_path, total, opts)
                 written.append(path)
                 text, warnings = youtube_chapters_text(meta_chapters, total)
                 yt = base.with_name(base.name + '_youtube.txt')
