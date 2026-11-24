@@ -61,7 +61,7 @@ class Settings:
     top_k: Optional[int] = None
     repetition_penalty: Optional[float] = None
     seed: int = 0
-    batch_size: int = 1
+    batch_size: int = 0  # 0 = auto (4 on CUDA, 1 otherwise)
     max_chunk_chars: Optional[int] = None
     # quality control
     qa: bool = True
@@ -473,7 +473,10 @@ class Synthesizer:
                 self._progress(len(seg.text), cached=True)
             else:
                 todo.append(i)
-        bs = max(1, int(self.settings.batch_size))
+        bs = int(self.settings.batch_size or 0) or (
+            4 if self.engine.stochastic and str(getattr(self.engine, 'device', '')).startswith('cuda') else 1)
+        if bs > 1:  # similar lengths in a batch: short chunks do not wait for long ones
+            todo.sort(key=lambda i: len(segments[i].text), reverse=True)
         for start in range(0, len(todo), bs):
             batch = todo[start:start + bs]
             for i, wav in self._render_batch([segments[i].text for i in batch], batch, label).items():

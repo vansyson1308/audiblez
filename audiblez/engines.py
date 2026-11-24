@@ -299,7 +299,8 @@ class QwenEngine(Engine):
             raise ValueError(f'Qwen custom-voice mode needs a speaker: {", ".join(QWEN_SPEAKERS)}')
         if mode == 'design' and not self.instruct:
             raise ValueError('Qwen voice-design mode needs an --instruct voice description')
-        self.model = model or load_qwen_model(self.model_id, device, dtype)
+        self.device = resolve_device(device) if model is None else str(getattr(model, 'device', 'cpu'))
+        self.model = model or load_qwen_model(self.model_id, self.device, dtype)
         self.prompt = None
         if mode == 'clone':
             ref_audio, ref_sr = load_reference_audio(voice_profile.audio_path)

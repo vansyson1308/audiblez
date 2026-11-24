@@ -53,7 +53,8 @@ def build_parser():
     g.add_argument('-c', '--cuda', default=False, action='store_true', help='Use GPU via CUDA (same as --device cuda)')
     g.add_argument('--device', default='auto', help='auto (default), cuda, mps or cpu')
     g.add_argument('--dtype', default='auto', help='auto (default), bfloat16, float16, float32')
-    g.add_argument('--batch-size', type=int, default=1, help='Chunks synthesized together (GPU: 4-8 is faster)')
+    g.add_argument('--batch-size', type=int, default=0, help='Chunks synthesized together (default: 4 on a CUDA GPU, '
+                                                          '1 on CPU; 8 can be faster on large GPUs)')
     g.add_argument('--temperature', type=float, help='Qwen3-TTS sampling temperature (default 0.9; lower = steadier)')
     g.add_argument('--top-p', type=float)
     g.add_argument('--top-k', type=int)
