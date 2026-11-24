@@ -617,6 +617,8 @@ class CoreThread(threading.Thread):
 
 
 def main():
+    from audiblez import ensure_utf8_stdio
+    ensure_utf8_stdio()
     print('Starting GUI...')
     app = wx.App(False)
     frame = MainWindow(None, "Audiblez - Generate Audiobooks from E-books")

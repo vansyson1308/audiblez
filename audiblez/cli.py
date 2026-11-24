@@ -111,6 +111,8 @@ def settings_from_args(args):
 
 
 def cli_main(argv=None):
+    from audiblez import ensure_utf8_stdio
+    ensure_utf8_stdio()
     parser = build_parser()
     argv = sys.argv[1:] if argv is None else argv
     if len(argv) == 0:

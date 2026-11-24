@@ -218,6 +218,8 @@ def cmd_list(args):
 
 
 def main(argv=None):
+    from audiblez import ensure_utf8_stdio
+    ensure_utf8_stdio()
     parser = argparse.ArgumentParser(prog='audiblez-voice', description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest='command', required=True)
