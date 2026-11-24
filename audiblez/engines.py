@@ -440,7 +440,8 @@ class QwenEngine(Engine):
             elif self.model_id in SHORT_REFERENCE_MODELS and duration > 8:
                 print(f'\033[93mWarning: {self.model_id} reads short sentences unreliably with a {duration:.0f}s '
                       f'reference. Add "short_reference" (the first ~5-7 s, cut in a pause, and its transcript) to '
-                      f'the voice profile, as in the bundled ru_* narrators.\033[0m')
+                      f'the voice profile, as in the bundled ru_* narrators: audiblez-voice design and create add it '
+                      f'when Whisper (faster-whisper) is installed and the reference has such a pause.\033[0m')
             try:
                 self._ref_embedding = full[0].ref_spk_embedding  # voice check against the whole reference
             except Exception:

@@ -11,6 +11,7 @@ You can also create a profile from your own clean recording (6-15 seconds) with 
 Only clone voices you have the right to use.
 """
 import argparse
+import bisect
 import json
 import sys
 import time
@@ -92,14 +93,158 @@ PREVIEW_TEXTS = {
 }
 
 
-def _write_profile(folder, wav, sr, text, language, meta):
+# "short_reference" of a profile (see SHORT_REFERENCE_MODELS in engines.py): the beginning of the reference up to a
+# pause after a complete sentence. The cut lies between these times (s); the bundled ru_* narrators: 5.58 and 6.72 s.
+SHORT_REFERENCE_SECONDS = (4.0, 8.0)
+QUIET_DB = -35.0  # the audio within ±QUIET_HALF_WINDOW of the cut is at least this far below the RMS of the clip
+QUIET_HALF_WINDOW = 0.08
+# Within a pause, a rise of BUMP_DB above its quietest level so far is an inhale (or the next word) and ends the pause:
+# in ru_male_narrator the silence after the first sentence (-56 dB) is followed by an inhale at 6.9-7.2 s (-30 dB).
+BUMP_DB = 10.0
+FLOOR_DB = 3.0  # the quietest part of the pause: the stretch around its minimum within FLOOR_DB of it
+_STEP = 0.01
+
+
+def _fold(ch):
+    return 'е' if ch in 'ёЁ' else ch.lower()
+
+
+def _sentence_ends(text, language):
+    """Positions in text right after each sentence but the last (where a short reference could end)."""
+    from audiblez.text import split_sentences
+    ends, pos = [], 0
+    for sentence in split_sentences(text, language)[:-1]:
+        i = text.find(sentence, pos)
+        if i < 0:
+            break
+        pos = i + len(sentence)
+        ends.append(pos)
+    return ends
+
+
+def _align_letters(text, words):
+    """
+    Letters of text (their positions) and, for each, the index of the Whisper word in which the same letter was heard
+    (None where Whisper heard something else). Punctuation and case are ignored, ё = е.
+    """
+    positions = [i for i, c in enumerate(text) if c.isalnum()]
+    heard, word_of = [], []
+    for k, (word, _, _) in enumerate(words):
+        for c in word:
+            if c.isalnum():
+                heard.append(_fold(c))
+                word_of.append(k)
+    import difflib
+    matcher = difflib.SequenceMatcher(None, [_fold(text[i]) for i in positions], heard, autojunk=False)
+    matched = [None] * len(positions)
+    for a, b, n in matcher.get_matching_blocks():
+        for j in range(n):
+            matched[a + j] = b + j
+    return positions, matched, word_of
+
+
+def _pause_level(wav, sr, times, clip_ms):
+    """dB, relative to the clip's RMS, of the audio within ±QUIET_HALF_WINDOW of each time."""
+    energy = np.concatenate([[0.0], np.cumsum(np.asarray(wav, dtype=np.float64) ** 2)])
+    lo = np.clip(((times - QUIET_HALF_WINDOW) * sr).astype(int), 0, len(wav))
+    hi = np.clip(((times + QUIET_HALF_WINDOW) * sr).astype(int), 0, len(wav))
+    ms = (energy[hi] - energy[lo]) / np.maximum(hi - lo, 1)
+    return 10 * np.log10(ms / clip_ms + 1e-12)
+
+
+def _cut_in_first_pause(level):
+    """Index (into level) of the middle of the quietest part of the first pause, or None if nothing is quiet enough."""
+    quiet = np.flatnonzero(level < QUIET_DB)
+    if not len(quiet):
+        return None
+    start = stop = int(quiet[0])
+    lowest = level[start]
+    while stop < len(level) and level[stop] < QUIET_DB and level[stop] < lowest + BUMP_DB:
+        lowest = min(lowest, level[stop])
+        stop += 1
+    best = start + int(np.argmin(level[start:stop]))
+    lo = hi = best
+    while lo > start and level[lo - 1] <= level[best] + FLOOR_DB:
+        lo -= 1
+    while hi < stop - 1 and level[hi + 1] <= level[best] + FLOOR_DB:
+        hi += 1
+    return (lo + hi) // 2
+
+
+def find_short_reference(wav, sr, text, words, language='ru'):
+    """
+    Where to cut the reference for SHORT_REFERENCE_MODELS: the first sentence end of `text` that Whisper heard, followed
+    by a pause in which the cut can lie between SHORT_REFERENCE_SECONDS. The cut goes in the quietest part of that
+    pause before any inhale. `words` are Whisper word timestamps [(word, start, end)] of wav.
+    Returns ({"seconds": ..., "text": <text up to that sentence end>}, None) or (None, why there is none).
+    """
+    text = text.strip()
+    if not words:
+        return None, 'Whisper heard no words'
+    ends = _sentence_ends(text, language)
+    if not ends:
+        return None, 'the transcript is a single sentence'
+    wav = np.asarray(wav, dtype=np.float32)
+    clip_ms = float(np.mean(wav.astype(np.float64) ** 2))
+    if clip_ms <= 0:
+        return None, 'the reference is silent'
+    positions, matched, word_of = _align_letters(text, words)
+    first, last = SHORT_REFERENCE_SECONDS
+    problems = []
+    for end in ends:
+        sentence = text[:end].rsplit(None, 1)[-1]
+        q = bisect.bisect_left(positions, end)  # first letter of the next sentence; q - 1: last one of this one
+        p = q - 1
+        if p < 1 or q + 1 >= len(positions):
+            continue
+        # the two letters on each side of the sentence end were heard, in a row and in two different words
+        around = [matched[j] for j in (p - 1, p, q, q + 1)]
+        if None in around or np.any(np.diff(around) != 1) or word_of[around[1]] == word_of[around[2]]:
+            problems.append(f'Whisper did not hear the end of "{sentence}" clearly')
+            continue
+        before, after = words[word_of[around[1]]], words[word_of[around[2]]]
+        # Whisper's word times are approximate: look for the pause between the middles of the two words
+        span_start, span_end = (before[1] + before[2]) / 2, (after[1] + after[2]) / 2
+        if span_start > last:
+            break
+        if span_end < first:  # the cut would come too early
+            continue
+        grid = np.arange(int(np.ceil(span_start / _STEP)), int(span_end / _STEP) + 1) * _STEP
+        cut = _cut_in_first_pause(_pause_level(wav, sr, grid, clip_ms)) if len(grid) else None
+        if cut is None:
+            problems.append(f'no pause after "{sentence}" ({before[2]:.1f} s) is {-QUIET_DB:.0f} dB quieter than '
+                            f'the speech')
+            continue
+        seconds = round(float(grid[cut]), 2)
+        if seconds < first:
+            continue
+        if seconds > last:
+            break
+        return dict(seconds=seconds, text=text[:end].strip()), None
+    problems.append(f'no {"other " if problems else ""}sentence end with a pause between {first:.0f} and {last:.0f} s')
+    return None, '; '.join(problems)
+
+
+def _write_profile(folder, wav, sr, text, language, meta, words=None, log=print):
+    """
+    Save a voice profile. With the Whisper word timestamps of wav (`words`), also its "short_reference" when the
+    reference has a suitable pause (see find_short_reference); otherwise a note says why it has none.
+    """
     import soundfile as sf
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
+    text = text.strip()
     sf.write(str(folder / 'reference.flac'), wav, sr, subtype='PCM_16', format='FLAC')
-    (folder / 'reference.txt').write_text(text.strip() + '\n', encoding='utf-8')
-    meta = dict(meta, audio='reference.flac', text=text.strip(), language=language,
-                duration=round(len(wav) / sr, 2))
+    (folder / 'reference.txt').write_text(text + '\n', encoding='utf-8')
+    meta = dict(meta, audio='reference.flac', text=text, language=language, duration=round(len(wav) / sr, 2))
+    if words is not None:
+        short, why = find_short_reference(wav, sr, text, words, language)
+        if short:
+            meta['short_reference'] = short
+            log(f'short reference: the first {short["seconds"]:.2f} s, "{short["text"]}"')
+        else:
+            log(f'\033[93mno short reference: {why}. Only --stress ruaccent needs it: without it, its model may '
+                f'read short sentences badly with this voice.\033[0m')
     (folder / 'profile.json').write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding='utf-8')
     return folder
 
@@ -160,6 +305,8 @@ def cmd_design(args):
     model = load_qwen_model(args.model or QWEN_DEFAULT_MODELS['design'], args.device, args.dtype)
     from audiblez.engines import QWEN_LANGUAGES
     asr = None if args.no_asr else _asr(language, args.device)
+    if asr is None and language == 'ru':
+        print('Without Whisper (faster-whisper) the candidates get no "short_reference" for --stress ruaccent.')
     results = []
     for i in range(1, args.count + 1):
         seed = args.seed + i
@@ -168,8 +315,11 @@ def cmd_design(args):
         wavs, sr = model.generate_voice_design(text=text, language=QWEN_LANGUAGES[language], instruct=instruct,
                                                max_new_tokens=1200)
         wav = prepare_reference(wavs[0], sr)
+        transcript, words = asr.transcribe_words(wav, sr) if asr is not None else (None, None)
+        notes = []
         folder = _write_profile(out / f'candidate_{i:02d}', wav, sr, text, language,
-                                dict(source='qwen3-tts voice design', instruct=instruct, seed=seed))
+                                dict(source='qwen3-tts voice design', instruct=instruct, seed=seed), words=words,
+                                log=notes.append)
         info = f'{len(wav) / sr:.1f}s, generated in {time.time() - t0:.0f}s'
         mismatch = False
         try:
@@ -183,7 +333,6 @@ def cmd_design(args):
             pass
         cer = None
         if asr is not None:
-            transcript = asr.transcribe(wav, sr)
             cer = char_error_rate(text, transcript)
             info += f', ASR error {cer:.0%}'
         from audiblez.text import language_profile
@@ -194,6 +343,8 @@ def cmd_design(args):
         too_long = len(wav) / sr > 16.0  # cloning is most reliable with references under ~15 s
         results.append((folder, cer, mismatch, too_long, rate_dev))
         print(f'  {folder}  ({info})')
+        for note in notes:
+            print(f'      {note}')
     print('\nListen to the candidates (reference.flac in each folder), then use the one you prefer:')
     best = min(results, key=lambda r: (r[2], (r[1] or 0) > 0.10, r[3], r[4] + (r[1] or 0)))[0]
     print(f'  audiblez book.epub --voice-profile {best}')
@@ -215,17 +366,19 @@ def cmd_create(args):
     if duration > 15:
         print(f'\033[93mWarning: reference is {duration:.1f}s. 6-15 s works best; longer references make cloning '
               f'less reliable. Consider trimming it (and its transcript).\033[0m')
-    folder = _write_profile(args.output, wav, sr, text, args.language, dict(source=str(args.audio)))
-    if not args.no_asr:
-        asr = _asr(args.language, args.device)
-        if asr is not None:
-            from audiblez.audio import char_error_rate
-            transcript = asr.transcribe(wav, sr)
-            cer = char_error_rate(text, transcript)
-            print(f'Transcript check: {cer:.0%} difference. Heard: "{transcript}"')
-            if cer > 0.15:
-                print('\033[93mThe transcript does not match the audio well. The text must be EXACTLY what is said '
-                      'in the recording, otherwise cloning quality drops.\033[0m')
+    asr = None if args.no_asr else _asr(args.language, args.device)
+    words = None
+    if asr is not None:
+        from audiblez.audio import char_error_rate
+        transcript, words = asr.transcribe_words(wav, sr)
+        cer = char_error_rate(text, transcript)
+        print(f'Transcript check: {cer:.0%} difference. Heard: "{transcript}"')
+        if cer > 0.15:
+            print('\033[93mThe transcript does not match the audio well. The text must be EXACTLY what is said '
+                  'in the recording, otherwise cloning quality drops.\033[0m')
+    elif duration > 8 and args.language == 'ru':
+        print('Without Whisper (faster-whisper) the profile gets no "short_reference" for --stress ruaccent.')
+    folder = _write_profile(args.output, wav, sr, text, args.language, dict(source=str(args.audio)), words=words)
     print(f'Voice profile created: {folder}\nUse it with: audiblez book.epub --voice-profile {folder}')
 
 
