@@ -512,6 +512,8 @@ def normalize_anonymized_years(text):
 
 def normalize_units(text):
     """Spell out unit, currency, year and century abbreviations (the numbers themselves are converted later)."""
+    # arithmetic and phone numbers: "2+2", "+7 999" -> "2 плюс 2", "плюс 7 999"
+    text = re.sub(r'(?<=\d)[ \t]*\+[ \t]*(?=\d)|(?<![\w+])\+(?=\d)', ' плюс ', text)
     # 1 000 000 -> 1000000
     text = re.sub(r'(?<![\d,.])(\d{1,3})((?:[   ]\d{3})+)(?!\d)',
                   lambda m: m.group(1) + re.sub(r'\s', '', m.group(2)), text)
@@ -639,12 +641,46 @@ def normalize_numbers(text):
 # Punctuation and headings
 # ---------------------------------------------------------------------------------------------------------------------
 
+_CAPS_RUN_RE = re.compile(r'(?<![\w-])[А-ЯЁ]+(?:-[А-ЯЁ]+)*(?:[ \t,;:—–«»"„“-]+[А-ЯЁ]+(?:-[А-ЯЁ]+)*)+(?![\w-])')
+_CYR_VOWELS = set('аеёиоуыэюяАЕЁИОУЫЭЮЯ')
+
+
+def normalize_shouting(text, min_words=3):
+    """
+    'ОН НЕ ОЖИДАЛ, ЧТО ПОЛЮБИТ СВОЮ ЖЕНУ' -> 'Он не ожидал, что полюбит свою жену' (YouTube-style titles: TTS models
+    may spell out capitalized words as abbreviations). Only runs of `min_words`+ capitalized words with real words
+    in them; abbreviations (МВД, СССР, США) keep their capitals.
+    """
+    def word(w):
+        w = w.group(0)
+        if w in _KEEP_CAPS or not any(c in _CYR_VOWELS for c in w):
+            return w
+        return w.lower()
+
+    def repl(m):
+        run = m.group(0)
+        words = re.findall(r'[А-ЯЁ]+(?:-[А-ЯЁ]+)*', run)
+        if len(words) < min_words or sum(len(w) >= 4 and any(c in _CYR_VOWELS for c in w) for w in words) < 2:
+            return run
+        out = re.sub(r'[А-ЯЁ]+(?:-[А-ЯЁ]+)*', word, run)
+        speech_start = re.search(r'[:—–«"„“]\s*$', m.string[:m.start()]) is not None
+        if out[:1].islower() and (speech_start or _at_sentence_start(m.string, m.start())):
+            out = out[:1].upper() + out[1:]
+        return out
+    return _CAPS_RUN_RE.sub(repl, text)
+
+
+_KEEP_CAPS = {'США', 'ООН', 'ЕС', 'ОАЭ', 'ЮАР', 'КГБ', 'ЦРУ', 'ГУЛАГ', 'ЗАГС', 'ВУЗ', 'МГУ', 'АЭС', 'ГЭС', 'ОМОН',
+              'ГИБДД', 'ГАИ', 'НКВД', 'ДНК', 'ИП', 'ООО', 'ОАО', 'ЗАО', 'ЖКХ', 'ЕГЭ', 'ОГЭ', 'НАТО', 'ЮНЕСКО'}
+
+
 def strip_stress_marks(text):
     return text.replace('́', '').replace('̀', '')
 
 
 def normalize_punctuation(text):
-    text = re.sub(r'(?<=\s)-(?=\s)', '—', text)  # hyphen used as a dash
+    text = re.sub(r'^\s*-{1,2}\s+', '— ', text)  # dialogue typed with a hyphen: "- Привет!"
+    text = re.sub(r'(?<=\s)-{1,2}(?=\s)', '—', text)  # hyphen used as a dash
     text = re.sub(r'(?<=\S)[ \t]*([—–])[ \t]*(?=\S)', r' \1 ', text)  # "Германн,— сказал" -> "Германн, — сказал"
     text = re.sub(r'^\s*[—–]\s*', '— ', text)  # dialogue dash
     text = re.sub(r'([?!])\.\.(?!\.)', r'\1…', text)  # "?.." -> "?…"
@@ -696,6 +732,7 @@ def normalize_heading(text):
 def normalize_ru(text, is_heading=False, keep_stress=False):
     if not keep_stress:
         text = strip_stress_marks(text)
+    text = normalize_shouting(text, min_words=2 if is_heading else 3)
     if is_heading:
         text = normalize_heading(text)
     text = normalize_anonymized_years(text)

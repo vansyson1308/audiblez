@@ -196,6 +196,8 @@ def markdown_to_blocks(text, ruby_mode='reading'):
             flush()
             continue
         line = re.sub(r'^\s{0,3}>\s?', '', line)  # blockquote
+        # "- Привет, - сказала она." is a line of dialogue typed with a hyphen, not a list item: keep it as a dash
+        line = re.sub(r'^\s*[-–]\s+(?=[«"„“]?[А-ЯЁ])', '— ', line)
         line = re.sub(r'^\s*(?:[-*+]|\d+[.)])\s+', '', line)  # list items
         para.append(line)
     flush()

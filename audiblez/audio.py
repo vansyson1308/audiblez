@@ -257,6 +257,7 @@ def japanese_reading(text):
 
 def _normalize_for_cer(text, lang='en'):
     lang = (lang or 'en')[:2]
+    text = text.replace('\u0301', '').replace('\u0300', '')  # stress marks (--stress) are not letters
     text = text.lower().replace('ё', 'е')
     if lang == 'ja':
         text = japanese_reading(text)
