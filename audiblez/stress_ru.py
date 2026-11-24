@@ -22,7 +22,7 @@ ACUTE = '́'
 GRAVE = '̀'
 VOWELS = 'аеёиоуыэюяАЕЁИОУЫЭЮЯ'
 RUACCENT_OPTIONS = dict(omograph_model_size='turbo3.1', use_dictionary=True)
-CACHE_VERSION = '1'
+CACHE_VERSION = '4'  # bump when the output changes (corrections, ё handling...)
 
 _WORD_RE = re.compile(rf'[А-ЯЁа-яё+{ACUTE}]+')
 
@@ -76,6 +76,81 @@ def restore_case(original, processed):
     return ''.join(out) if i == len(original) else None
 
 
+# Corrections applied after RUAccent, found by reviewing every homograph of a 1.6-hour story: RUAccent chose the
+# colloquial stress of some past-tense forms (по́няла, по́дняла ×10) and the wrong case of very common nouns
+# (у двери́, вытирая руки́). Values are the stressed form ("+" before the vowel).
+NORMATIVE = {  # past-tense forms with a single standard stress
+    'поняла': 'понял+а', 'подняла': 'поднял+а', 'приняла': 'принял+а', 'принялась': 'принял+ась',
+    'начался': 'началс+я', 'началась': 'начал+ась', 'отняла': 'отнял+а', 'заняла': 'занял+а', 'наняла': 'нанял+а',
+    'по-моему': 'по-м+оему', 'по-твоему': 'по-тв+оему',
+}
+# homographs decided by the preposition before them: {word: (stress after these prepositions, stress otherwise)}
+BY_PREPOSITION = {
+    'двери': ({'в', 'во', 'на'}, 'двер+и', 'дв+ери'),  # в двери́ (locative) / у две́ри, две́ри (plural)
+    'руки': ({'из', 'от', 'у', 'до', 'для', 'без', 'около', 'возле', 'с', 'со'}, 'рук+и', 'р+уки'),
+    'ноги': ({'из', 'от', 'у', 'до', 'для', 'без', 'около', 'возле', 'с', 'со'}, 'ног+и', 'н+оги'),
+    'губы': ({'из', 'от', 'у', 'до', 'для', 'без', 'около', 'возле', 'с', 'со'}, 'губ+ы', 'г+убы'),
+}
+# «не» is stressed only before a few past-tense forms, which then lose their own stress (не́ был, не́ было, не́ дали,
+# не́ жил), and in «не́ за что», «не́ с кем»... RUAccent stressed it in 58 of the 312 «не» of that story, nearly always
+# wrongly (не́ смогла́ ×4, не́ хочу́, не́ уме́ю, не́ в, не́ со, and не́ бы́ло with two stresses), and the stress model
+# reads such a mark as an emphatic «НЕ». Forms where both stresses are standard (не по́нял / не́ понял) keep the
+# particle unstressed.
+NE_STRESSED_BEFORE = {'был', 'было', 'были', 'дал', 'дало', 'дали', 'жил', 'жило', 'жили'}
+_NE_PREPOSITIONS = {'за', 'о', 'об', 'с', 'со', 'к', 'ко', 'на', 'у', 'от', 'для', 'при', 'про', 'по', 'в', 'во', 'из'}
+_NE_PRONOUNS = {'что', 'чем', 'чего', 'чему', 'чём', 'кого', 'кем', 'кому', 'ком'}
+_TOKEN_RE = re.compile(r'[А-ЯЁа-яё+]+(?:-[А-ЯЁа-яё+]+)*')
+
+
+def _with_case(stressed_form, word):
+    """stressed_form ("+" notation, lowercase) with the letter case of word."""
+    letters = word.replace('+', '')
+    out, j = [], 0
+    for ch in stressed_form:
+        if ch == '+':
+            out.append('+')
+        else:
+            out.append(letters[j] if j < len(letters) else ch)
+            j += 1
+    return ''.join(out)
+
+
+def apply_corrections(src, stressed):
+    """
+    Fix known RUAccent choices in `stressed` (its output for `src`, both in "+" notation). Words that already had a
+    mark in `src` (from the e-book or the lexicon) are never changed.
+    """
+    src_words = _TOKEN_RE.findall(src)
+    matches = list(_TOKEN_RE.finditer(stressed))
+    if len(src_words) != len(matches):
+        return stressed
+    words = [m.group(0) for m in matches]
+    bares = [w.replace('+', '').lower() for w in words]
+    for k, orig in enumerate(src_words):
+        if '+' in orig:
+            continue
+        bare, prev = bares[k], bares[k - 1] if k else ''
+        if bare in NORMATIVE:
+            words[k] = _with_case(NORMATIVE[bare], words[k])
+        elif bare in BY_PREPOSITION:
+            preps, after_prep, otherwise = BY_PREPOSITION[bare]
+            words[k] = _with_case(after_prep if prev in preps else otherwise, words[k])
+        elif bare == 'не' and '+' in words[k]:
+            nxt = bares[k + 1] if k + 1 < len(words) else ''
+            after = bares[k + 2] if k + 2 < len(words) else ''
+            if nxt in NE_STRESSED_BEFORE:
+                if '+' not in src_words[k + 1]:
+                    words[k + 1] = words[k + 1].replace('+', '')  # не́ было, not не́ бы́ло
+            elif not (nxt in _NE_PREPOSITIONS and after in _NE_PRONOUNS):
+                words[k] = words[k].replace('+', '')
+    pieces, pos = [], 0
+    for m, w in zip(matches, words):
+        pieces += [stressed[pos:m.start()], w]
+        pos = m.end()
+    pieces.append(stressed[pos:])
+    return ''.join(pieces)
+
+
 class Stressor:
     """Adds stress marks to normalized Russian text, with a persistent cache (RUAccent takes ~0.1 s per sentence)."""
 
@@ -100,6 +175,11 @@ class Stressor:
             print('Loading RUAccent (stress marks and ё)...')
             acc = RUAccent()
             acc.load(**RUACCENT_OPTIONS)
+            # RUAccent's guess of ё on homographs (лет/лёт, села/сёла, небо/нёбо, самое/самоё, поем/поём) was wrong
+            # 16 times out of 16 in a 1.6-hour story whose author already writes ё: keep only its dictionary of
+            # unambiguous ё words (клеёный, стёганый, узнаёт...) and our own restore_yo.
+            if hasattr(acc, 'yo_homographs'):
+                acc.yo_homographs = {}
             self._accentizer = acc
         return self._accentizer
 
@@ -118,7 +198,7 @@ class Stressor:
         result = restore_case(src, processed)
         if result is None:  # should not happen; stress the text as written rather than lose the case
             result = self.accentizer.process_all(src)
-        out = plus_to_acute(result)
+        out = plus_to_acute(apply_corrections(src, result))
         self.cache[key] = out
         self._dirty = True
         return out

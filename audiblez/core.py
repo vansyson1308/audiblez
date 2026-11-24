@@ -90,6 +90,7 @@ class Settings:
     true_peak: float = -1.5
     episode_hours: Optional[float] = None
     cover: Optional[str] = None
+    slides: Optional[str] = None  # pictures of the video: a folder, or a text file "image | cue" (see slides.py)
     keep_master: bool = False
     dry_run: bool = False
     chapters: Optional[str] = None  # e.g. "1-3,5"
@@ -516,6 +517,14 @@ def make_verifier(engine, language, settings: Settings, log=print):
         return None
 
 
+def cache_file_ok(path):
+    """A cached chunk exists and is not empty (an empty file was left by older versions for takes without speech)."""
+    try:
+        return path.stat().st_size > 0
+    except OSError:
+        return False
+
+
 def load_failed(cache_dir):
     """
     {key: entry} of the chunks whose latest take did not pass the quality checks, from qa_failed.jsonl (appended by
@@ -574,7 +583,7 @@ class CacheView:
     def is_cached(self, text, retry_failed=False, since=None):
         """With retry_failed, a failed chunk counts as missing unless it was regenerated after `since`."""
         path = self.path(text)
-        if not path.exists():
+        if not cache_file_ok(path):
             return False
         if retry_failed and chunk_key(self.fingerprint, text) in self.failed_keys:
             return since is not None and path.stat().st_mtime >= since
@@ -624,7 +633,7 @@ class Synthesizer:
         return self.cache_dir / f'{self.key(text)}.flac'
 
     def is_cached(self, text):
-        if not self.cache_path(text).exists():
+        if not cache_file_ok(self.cache_path(text)):
             return False
         return not (self.settings.retry_failed and self.key(text) in self.failed_keys)
 
@@ -690,8 +699,9 @@ class Synthesizer:
             for k, wav in zip(pending, raw):
                 text = texts[k]
                 cleaned, qa = self.evaluate(wav, text)
-                if k not in best or qa.score < best[k][0]:
-                    best[k] = (qa.score, cleaned, qa)
+                rank = (len(cleaned) == 0, qa.score)  # a take with some speech beats an empty one
+                if k not in best or rank < best[k][0]:
+                    best[k] = (rank, cleaned, qa)
                 if not qa.ok and attempt < self.qa_cfg.max_retries:
                     still.append(k)
                     self.log(f'\033[93m  ↻ retry {attempt + 1}/{self.qa_cfg.max_retries}: {"; ".join(qa.reasons)}'
@@ -701,8 +711,10 @@ class Synthesizer:
             self.stats.synth_audio += sum(len(w) for w in raw) / sr
             pending = still
             attempt += 1
-        for k, (score, wav, qa) in best.items():
+        for k, (_, wav, qa) in best.items():
             text = texts[k]
+            if len(wav) == 0:  # no take had any speech: a short silence keeps the book going (listed in the report)
+                wav = np.zeros(int(0.2 * sr), np.float32)
             tmp = self.cache_path(text).with_suffix('.tmp.flac')
             soundfile.write(str(tmp), wav, sr, subtype='PCM_16', format='FLAC')
             tmp.replace(self.cache_path(text))  # atomic: a crash never leaves a truncated chunk in the cache
@@ -788,13 +800,18 @@ def cache_dir_for(work_dir, engine):
     return Path(work_dir) / 'cache' / f'{engine.name}-{fp_hash}'
 
 
-def assemble_chapter(segments: List[Segment], audios, sr, scale=1.0, room_tone=None):
-    """Chunks and pauses of a chapter; pauses are digital silence, or `room_tone(seconds)` (see audio.RoomTone)."""
+def assemble_chapter(segments: List[Segment], audios, sr, scale=1.0, room_tone=None, timings=None):
+    """
+    Chunks and pauses of a chapter; pauses are digital silence, or `room_tone(seconds)` (see audio.RoomTone).
+    `timings`, if a list, receives the (start, end) seconds of every segment in the chapter.
+    """
     gap = room_tone or (lambda seconds: silence(seconds, sr))
     lead = PAUSES['chapter_lead'] * scale
     parts, t, split_points = [gap(lead)], lead, []
     for i, (seg, wav) in enumerate(zip(segments, audios)):
         parts.append(np.asarray(wav, dtype=np.float32))
+        if timings is not None:
+            timings.append((t, t + len(wav) / sr))
         t += len(wav) / sr
         pause = seg.pause_after
         if i == len(segments) - 1:
@@ -914,6 +931,18 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
         stressor.save()
         print(f'Stress marks placed by RUAccent ({time.time() - t0:.0f}s). Check them in script.txt; fix a word '
               f'with a --lexicon rule such as "замок = замо́к".')
+    slides = None
+    if settings.slides:
+        from audiblez.slides import load_slides, resolve_cues
+        partial = bool(settings.chapters or max_chapters or max_sentences)
+        slides = resolve_cues(load_slides(settings.slides), chapters, strict=not partial)
+        print('Video slides:')
+        for sl in slides:
+            where = ('from 0:00' if sl.chapter is None and sl is slides[0] else
+                     f'from chapter {chapters[sl.chapter].index}: '
+                     f'"{chapters[sl.chapter].segments[sl.segment].text[:60]}…"'
+                     if sl.chapter is not None else 'evenly between the cued slides around it')
+            print(f'  {sl.image.name:24s} {where}')
     all_texts = [(c.title, s.text) for c in chapters for s in c.segments]
     total_chars = sum(len(t) for _, t in all_texts)
     est_hours = sum(textmod.count_letters(t) for _, t in all_texts) / profile['rate'] / 3600 / settings.speed
@@ -1003,13 +1032,17 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
     from audiblez.export import ChapterAudio
     chapters_dir = work_dir / 'chapters'
     chapters_dir.mkdir(exist_ok=True)
+    chapter_timings = []
     for c in chapters:
         if post_event:
             post_event('CORE_CHAPTER_STARTED', chapter_index=c.source_index)
         audios = level_chunks([cache.load(s.text) for s in c.segments], sr)
         tone_db = estimate_noise_floor(audios, sr) if settings.room_tone else None
         tone = RoomTone(tone_db, sr, seed=c.index) if tone_db is not None else None
-        wav, split_points = assemble_chapter(c.segments, audios, sr, settings.pause_scale, room_tone=tone)
+        timings = []
+        wav, split_points = assemble_chapter(c.segments, audios, sr, settings.pause_scale, room_tone=tone,
+                                             timings=timings)
+        chapter_timings.append(timings)
         path = chapters_dir / f'chapter_{c.index:03d}.wav'
         soundfile.write(str(path), wav, sr, subtype='PCM_16')
         chapter_audio.append(ChapterAudio(c.title, path, len(wav) / sr, split_points))
@@ -1025,10 +1058,21 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
     if has_ffmpeg():
         from audiblez.export import OutputOptions, export_audiobook
         native_speed = choice['engine'] == 'kokoro'
+        slide_times = None
+        if slides:
+            from audiblez.slides import place_slides
+            offsets, t = [], 0.0
+            for ch in chapter_audio:
+                offsets.append(t)
+                t += ch.duration
+            segment_times = [[(off + a, off + b) for a, b in tm] for off, tm in zip(offsets, chapter_timings)]
+            slide_times = place_slides(slides, segment_times, t)
+        cover_path = Path(settings.cover) if settings.cover else None
+        if cover_path is None and not cover_image and slides:
+            cover_path = slides[0].image  # the m4b artwork
         opts = OutputOptions(formats=tuple(settings.formats), loudness=settings.loudness, true_peak=settings.true_peak,
                              speed=1.0 if native_speed else settings.speed, episode_hours=settings.episode_hours,
-                             cover_path=Path(settings.cover) if settings.cover else None,
-                             keep_master=settings.keep_master)
+                             cover_path=cover_path, keep_master=settings.keep_master, slides=slide_times)
         written = export_audiobook(chapter_audio, output_folder / stem, title, creator, cover_image, opts,
                                    language=language)
         print('\nCreated:')

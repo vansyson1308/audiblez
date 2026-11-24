@@ -26,7 +26,7 @@ jobs:
         run: |
           pip install pytest
           python -m pytest -q test/test_text.py test/test_normalize_ru.py test/test_audio_export.py test/test_pipeline.py \
-            test/test_cjk.py test/test_formats.py test/test_stress_ru.py test/test_reliability.py
+            test/test_cjk.py test/test_formats.py test/test_stress_ru.py test/test_reliability.py test/test_slides.py
   windows-git-clone-and-run:
     runs-on: windows-latest
     steps:

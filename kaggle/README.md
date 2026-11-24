@@ -26,7 +26,7 @@ Sửa ô *Settings / Cấu hình*: `BOOK` (đường dẫn trong `/kaggle/input/
 `BOOK = sorted(glob.glob('/kaggle/input/audiblez-input/*.txt'))` sau `import glob`),
 `VOICE` (`'ru_female_narrator'`, `'ru_male_narrator'` hoặc thư mục giọng trong dataset, vd.
 `'/kaggle/input/audiblez-input/voices/giong_nu'`), `STRESS = True` (trọng âm), `EXTRA` (vd.
-`'--lexicon /kaggle/input/audiblez-input/tu_dien.txt --cover /kaggle/input/audiblez-input/cover.jpg'`), rồi
+`'--lexicon /kaggle/input/audiblez-input/tu_dien.txt --slides /kaggle/input/audiblez-input/slides.txt'`), rồi
 **Save Version → Save & Run All (Commit)**:
 notebook chạy nền đến hết, có thể tắt trình duyệt. Kết quả ở tab *Output* của version đó.
 

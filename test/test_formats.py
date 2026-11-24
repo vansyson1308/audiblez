@@ -127,6 +127,9 @@ class FormatsTest(unittest.TestCase):
         self.assertEqual((src.title, src.announce), ('2026-11-25_story', False))
         res = core.main(story, output_folder=self.tmp / 'out', settings=core.Settings(dry_run=True))
         self.assertEqual(res['chapters'][0].segments[0].text, 'Татьяна стояла у окна.')
+        story.write_text('---\ntitle: Письма из старого буфета\n---\nТатьяна стояла у окна.\n', encoding='utf-8')
+        res = core.main(story, output_folder=self.tmp / 'out', settings=core.Settings(dry_run=True))
+        self.assertEqual(res['chapters'][0].title, 'Письма из старого буфета')  # not the file name
         ja = self.tmp / 'hoshi.txt'
         ja.write_text('星を継ぐ者\n\n彼は空を見上げた。\n', encoding='utf-8')
         self.assertEqual(core.load_source(ja).title, '星を継ぐ者')

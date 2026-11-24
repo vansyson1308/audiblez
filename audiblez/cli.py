@@ -106,6 +106,9 @@ def build_parser():
     g.add_argument('--episode-hours', type=float, help='Split the output in parts of about this many hours, e.g. 2')
     g.add_argument('--loudness', type=float, default=-16.0, help='Target loudness in LUFS (default -16)')
     g.add_argument('--cover', metavar='IMAGE', help='Cover image for the m4b and the video (default: from the e-book)')
+    g.add_argument('--slides', metavar='FILE|FOLDER',
+                   help='Pictures of the video: a folder of images (evenly spaced), or a text file with one line per '
+                        'picture "image.jpg | text where it starts" (crossfades; checked with --dry-run)')
     g.add_argument('--keep-master', action='store_true', help='Keep the mastered WAV file(s)')
     return parser
 
@@ -131,7 +134,8 @@ def settings_from_args(args):
         announce_title=not args.no_title,
         pause_scale=args.pause_scale, room_tone=not args.no_room_tone, formats=formats, loudness=args.loudness,
         episode_hours=args.episode_hours,
-        cover=args.cover, keep_master=args.keep_master, dry_run=args.dry_run, chapters=args.chapters)
+        cover=args.cover, slides=args.slides, keep_master=args.keep_master, dry_run=args.dry_run,
+        chapters=args.chapters)
 
 
 def cli_main(argv=None):

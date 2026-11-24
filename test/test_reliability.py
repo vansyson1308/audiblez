@@ -66,5 +66,87 @@ class RunsTest(unittest.TestCase):
         self.assertLess(time.time() - t0, 120)
 
 
+class EmptyTakeTest(unittest.TestCase):
+    def test_take_without_speech_never_breaks_the_book(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            story = d / 'story.txt'
+            story.write_text('Первый абзац рассказа, совсем обычный.\n\nТишина в эфире.\n\nПоследний абзац.\n',
+                             encoding='utf-8')
+            settings = core.Settings(formats=('m4b',), asr='off', engine_factory=FACTORY, max_retries=1)
+            res = core.main(story, output_folder=d / 'out', settings=settings)
+            self.assertTrue(res['files'])  # the book is finished, the chunk is listed in the QA report
+            self.assertEqual([r['text'] for r in res['qa_failures']], ['Тишина в эфире.'])
+            flacs = list((d / 'out' / 'story.audiblez' / 'cache').glob('*/*.flac'))
+            self.assertEqual(len(flacs), 3)
+            self.assertTrue(all(f.stat().st_size > 0 for f in flacs))
+            # empty files left in the cache by older versions are synthesized again instead of crashing the run
+            for f in flacs:
+                f.write_bytes(b'')
+            res2 = core.main(story, output_folder=d / 'out', settings=settings)
+            self.assertTrue(res2['files'])
+            self.assertTrue(all(f.stat().st_size > 0 for f in flacs))
+
+
+class AsrUnitsTest(unittest.TestCase):
+    def test_unit_symbols_written_by_whisper(self):
+        """Whisper writes "на 15%" for "на пятнадцать": not a clipped ending. A clipped ending is still one."""
+        import numpy as np
+
+        from audiblez.audio import AsrVerifier, QAConfig, QAResult
+        verifier = object.__new__(AsrVerifier)  # no Whisper model: the transcript is given
+        verifier.language = 'ru'
+        text = 'Если мы упустим этого покупателя, следующий появится только весной, а цена будет ниже процентов на ' \
+               'пятнадцать.'
+        cases = [(text, 'Если мы упустим этого покупателя, следующий появится только весной, а цена будет ниже '
+                        'процентов на 15%.'),
+                 ('Цена на дом за год упала на пятнадцать процентов.', 'Цена на дом за год упала на 15%.')]
+        for reference, transcript in cases:
+            verifier.transcribe = lambda wav, sr, t=transcript: t
+            result = verifier.check(np.zeros(24000, np.float32), 24000, reference, QAConfig(), QAResult(ok=True))
+            self.assertTrue(result.ok, result.reasons)
+        verifier.transcribe = lambda wav, sr: ('Если мы упустим этого покупателя, следующий появится только весной, '
+                                               'а цена будет ниже процентов')
+        result = verifier.check(np.zeros(24000, np.float32), 24000, text, QAConfig(), QAResult(ok=True))
+        self.assertFalse(result.ok)
+
+
+class TokenFloorTest(unittest.TestCase):
+    def test_short_sentences_get_a_token_floor(self):
+        """qwen-tts hard-codes min_new_tokens=2: the engine raises it so a short sentence is not cut after a syllable."""
+        from types import SimpleNamespace
+
+        import numpy as np
+
+        from audiblez.engines import QwenEngine, find_voice_profile
+        seen = []
+
+        class Talker:
+            def generate(self, **kwargs):
+                seen.append(kwargs['min_new_tokens'])
+
+        class Model:  # the layout of qwen_tts.Qwen3TTSModel
+            device = 'cpu'
+
+            def __init__(self):
+                self.model = SimpleNamespace(talker=Talker())
+
+            def create_voice_clone_prompt(self, **kwargs):
+                return []
+
+            def generate_voice_clone(self, text, **kwargs):
+                self.model.talker.generate(min_new_tokens=2)
+                return [np.zeros(2400, np.float32) for _ in text], 24000
+
+        engine = QwenEngine(mode='clone', language='ru', voice_profile=find_voice_profile('ru_female_narrator'),
+                            model=Model())
+        engine.synthesize(['Приятного прослушивания.'])
+        self.assertEqual(seen, [11])  # 22 letters at twice 12 letters/s = 0.92 s = 11 frames of 12.5 Hz
+        engine.synthesize(['Да.', 'Приятного прослушивания.'])
+        self.assertEqual(seen[-1], 2)  # a batch shares the floor of its shortest text
+        long_text = 'Вера кивнула и долго смотрела на тёмную воду. ' * 6
+        self.assertLess(engine.token_floor(long_text) / 12.5, len(long_text) / 12.0 / 1.5)  # far below a real reading
+
+
 if __name__ == '__main__':
     unittest.main()

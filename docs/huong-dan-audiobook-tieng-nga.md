@@ -97,12 +97,30 @@ Lỗi dễ nghe thấy nhất của TTS tiếng Nga là **đặt sai trọng âm
    (chạy trên CPU, ~10–100 ms mỗi câu, có cache; lần đầu tải ~1,5 GB model).
 2. Văn bản được đọc bằng [siriusfreak/qwen3-tts-12hz-1.7b-ru-stress-cf](https://huggingface.co/siriusfreak/qwen3-tts-12hz-1.7b-ru-stress-cf),
    bản fine-tune Apache-2.0 của chính Qwen3-TTS 1.7B được huấn luyện để **làm theo dấu trọng âm** (theo model card: 96–100%
-   so với 17–65% của model gốc). Cùng giọng clone, cùng tốc độ.
+   so với 17–65% của model gốc). Cùng giọng clone; trên cảnh thoại dùng để nghe thử, nó đọc chậm hơn model gốc
+   khoảng 8% (91 s so với 84 s).
 
 Thử trên bộ 24 câu có từ đồng hình (за́мок/замо́к, му́ки/муки́, бе́лки/белки́, доро́гой/дорого́й…), RUAccent đặt đúng cả 24
 khi mỗi câu có một từ đồng hình. Lưu ý:
 
-- RUAccent vẫn sai khoảng 2–3% số từ (số của tác giả model): sửa bằng `--lexicon` khi nghe thấy.
+- RUAccent vẫn sai khoảng 2–3% số từ (số của tác giả model): sửa bằng `--lexicon` khi nghe thấy. Trên truyện đầu
+  tiên (707 từ đồng hình) em đã rà tay từng từ: những lỗi lặp lại (по́няла → поняла́, у двери́ → у две́ри, руки́ →
+  ру́ки, по-моему́, và «не» bị đặt trọng âm 58/312 lần như не́ смогла́ → не смогла́, chỉ giữ не́ был/не́ было…) được
+  audiblez tự sửa; phần đoán chữ ё cho từ đồng hình của RUAccent (лет → лёт, села → сёла,
+  небо → нёбо) đã bị tắt vì sai cả 16/16 lần. Lỗi riêng của từng truyện (tên riêng, một từ đồng hình trong câu
+  lạ) ghi vào `tu_dien.txt`, vd. `Замок был старый = Замо́к был старый`, `re:\bШуман(а|у|ом|е)?\b = Шу́ман\1`.
+- **Bản fine-tune này cần giọng mẫu ngắn.** Với giọng mẫu 13 giây của `ru_female_narrator`, nó im lặng hoặc dừng sau
+  một âm tiết ở cả 18/18 lần đọc 9 câu ngắn (9–57 chữ cái: «— Я помню, Олег.», «Приятного прослушивания.»…), có hay
+  không có dấu trọng âm, mà một truyện có rất nhiều câu như vậy. Với 5,6 giây đầu của chính giọng mẫu đó (cắt ở chỗ
+  nghỉ sau câu đầu) nó đọc đúng 18/18, cùng độ dài như model gốc, và cả 8/8 đoạn dài/trung bình. audiblez tự dùng
+  phần đầu này khi đọc bằng model trọng âm: hai giọng có sẵn đã khai báo sẵn (`"short_reference"` trong
+  `profile.json`). Giọng tự tạo thì thêm vào `profile.json` của nó (thời điểm cắt nằm trong một chỗ nghỉ, sau một
+  câu trọn vẹn, khoảng 5–7 s, và đúng câu đó):
+  ```json
+  "short_reference": {"seconds": 5.58, "text": "Тишина стояла такая, что было слышно, как тикают часы в соседней комнате."}
+  ```
+  Thiếu dòng này thì audiblez cảnh báo khi nạp model. Model gốc (không `--stress`) đọc tốt câu ngắn với giọng mẫu dài
+  (22/22) nên không đổi gì.
 - **Model card cảnh báo**: một phần câu dùng để huấn luyện lấy từ bộ dữ liệu `biggest-ru-book` không khai báo giấy
   phép; tác giả khuyên kiểm tra trước khi dùng thương mại. Trọng số model là Apache-2.0.
 - Hãy nghe so sánh một chương có và không có `--stress ruaccent` trước khi làm cả loạt.
@@ -179,6 +197,30 @@ Kết quả:
 | `truyen.m4b` | Bản audiobook có chương (nghe kiểm tra trên điện thoại) |
 | `truyen.audiblez/script.txt` | Văn bản thực sự được đọc |
 | `truyen.audiblez/qa_report.txt` | Những câu không qua kiểm tra tự động (kể cả từ các lần chạy trước) — nên nghe lại |
+
+## 7b. Nhiều ảnh trong video (`--slides`)
+
+Thay vì một ảnh tĩnh suốt 2 giờ, video có thể đổi ảnh **đúng cảnh của truyện**, chuyển cảnh mờ dần 2,5 giây. Tạo file
+`slides.txt` cạnh các ảnh, mỗi dòng một ảnh, kèm (tuỳ chọn) đoạn chữ đầu của đoạn văn mà ảnh bắt đầu xuất hiện:
+
+```
+# ảnh             | đoạn văn bắt đầu bằng (hoặc chứa) câu này
+naberezhnaya.jpg
+bufet.jpg         | Здесь всё дышало Галиной Ивановной
+pismo.jpg         | Льняная ткань распалась
+naberezhnaya.jpg  | Утром дождь наконец кончился
+```
+
+```bash
+audiblez truyen.txt --youtube --slides slides.txt --dry-run     # kiểm tra: in ra mỗi ảnh bắt đầu từ câu nào
+```
+
+- Ảnh đầu luôn hiện từ 0:00; dòng không có câu mốc thì được đặt ở giữa hai ảnh kề nó.
+- Câu mốc so khớp không phân biệt hoa/thường, е/ё, dấu câu, dấu trọng âm; phải theo đúng thứ tự trong truyện. Câu
+  không tìm thấy sẽ **báo lỗi ngay khi `--dry-run`**, trước khi tốn GPU.
+- Ảnh 16:9 (vd. 1344×756, 1920×1080) phủ kín màn hình; ảnh tỉ lệ khác được đặt trên nền mờ của chính nó.
+- Cũng có thể đưa cả thư mục ảnh: `--slides thu_muc_anh/` (chia đều theo thời lượng, theo thứ tự tên file).
+- Mã hoá nhanh: video 10 phút với 3 ảnh mất khoảng 1 phút trên CPU 4 nhân (5 khung hình/giây, ảnh giải mã một lần).
 
 ## 8. Chạy miễn phí trên Kaggle (2 × T4)
 

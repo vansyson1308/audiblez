@@ -507,7 +507,13 @@ class Chunk:
 
 
 def chunk_paragraph(text: str, lang: str, max_chars: int) -> List[Chunk]:
-    """Pack the sentences of a paragraph into chunks of at most max_chars characters (never crossing paragraphs)."""
+    """
+    Pack the sentences of a paragraph into chunks of at most max_chars characters (never crossing paragraphs).
+    Greedy packing can leave a very short last chunk (a 300-character limit and a paragraph of 524 characters
+    give 210 + 290 + 24): such a chunk is read without context and short texts are where an autoregressive TTS
+    fails most (it stops after a syllable or mumbles). The paragraph is then split again into the same number of
+    chunks with lengths as even as possible.
+    """
     pieces: List[Chunk] = []
     joiner = '' if (lang or 'en')[:2] in _CJK_LANGS else ' '  # Japanese/Chinese are written without spaces
     for sentence in split_sentences(text, lang):
@@ -520,7 +526,46 @@ def chunk_paragraph(text: str, lang: str, max_chars: int) -> List[Chunk]:
             chunks[-1] = Chunk(chunks[-1].text + joiner + piece.text, piece.sentence_end)
         else:
             chunks.append(piece)
+    if len(chunks) > 1 and min(len(c.text) for c in chunks) < max_chars // 4:
+        chunks = _balanced_chunks(pieces, len(chunks), joiner, max_chars) or chunks
     return chunks
+
+
+def _balanced_chunks(pieces: List[Chunk], n_chunks: int, joiner: str, max_chars: int) -> Optional[List[Chunk]]:
+    """
+    The pieces grouped into n_chunks consecutive chunks of at most max_chars characters, minimizing the sum of the
+    squared lengths (= lengths as even as possible). As in the greedy packing, nothing is appended after a piece
+    that ends in the middle of a sentence. None if there is no such grouping.
+    """
+    n = len(pieces)
+    inf = float('inf')
+
+    def group_len(i, j):  # pieces[i:j] joined
+        return sum(len(p.text) for p in pieces[i:j]) + len(joiner) * (j - i - 1)
+
+    def valid(i, j):
+        return group_len(i, j) <= max_chars and all(p.sentence_end for p in pieces[i:j - 1])
+
+    # cost[k][j]: best cost of the first j pieces in k chunks; cut[k][j]: start of the last chunk
+    cost = [[inf] * (n + 1) for _ in range(n_chunks + 1)]
+    cut = [[0] * (n + 1) for _ in range(n_chunks + 1)]
+    cost[0][0] = 0.0
+    for k in range(1, n_chunks + 1):
+        for j in range(1, n + 1):
+            for i in range(j - 1, -1, -1):
+                if group_len(i, j) > max_chars:
+                    break
+                if cost[k - 1][i] < inf and valid(i, j):
+                    c = cost[k - 1][i] + group_len(i, j) ** 2
+                    if c < cost[k][j]:
+                        cost[k][j], cut[k][j] = c, i
+    if cost[n_chunks][n] == inf:
+        return None
+    bounds, j = [], n
+    for k in range(n_chunks, 0, -1):
+        bounds.append((cut[k][j], j))
+        j = cut[k][j]
+    return [Chunk(joiner.join(p.text for p in pieces[i:j]), pieces[j - 1].sentence_end) for i, j in reversed(bounds)]
 
 
 # Typical narration speed in letters (str.isalnum characters) per second, and the chunk size that keeps a

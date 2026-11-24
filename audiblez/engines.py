@@ -180,6 +180,17 @@ class VoiceProfile:
         self.meta = meta or {}
         self.path = path
 
+    @property
+    def short_reference(self):
+        """
+        (seconds, transcript) of the beginning of the reference, cut in a pause after a sentence, when the profile
+        declares it ("short_reference": {"seconds": 5.58, "text": "..."}): see SHORT_REFERENCE_MODELS.
+        """
+        short = self.meta.get('short_reference') or {}
+        if short.get('seconds') and str(short.get('text') or '').strip():
+            return float(short['seconds']), str(short['text']).strip()
+        return None
+
     @classmethod
     def load(cls, path):
         path = Path(path)
@@ -262,6 +273,25 @@ def load_qwen_model(model_id, device='auto', dtype='auto'):
     return model
 
 
+def install_min_tokens_hook(model, floor):
+    """
+    qwen-tts always generates with min_new_tokens=2 and does not forward that argument: wrap the talker's generate
+    so that floor() (codec tokens) is used instead. A model without the expected layout is left untouched.
+    """
+    talker = getattr(getattr(model, 'model', None), 'talker', None)
+    generate = getattr(talker, 'generate', None)
+    if generate is None or getattr(generate, '_audiblez_floor', False):
+        return False
+
+    def generate_with_floor(*args, **kwargs):
+        kwargs['min_new_tokens'] = max(int(kwargs.get('min_new_tokens') or 0), int(floor() or 0))
+        return generate(*args, **kwargs)
+
+    generate_with_floor._audiblez_floor = True
+    talker.generate = generate_with_floor
+    return True
+
+
 def keep_codec_fp32(model, torch_dtype):
     """
     Run the speech codec (codes -> waveform decoder, and the reference encoder) in float32 when the language model
@@ -293,6 +323,21 @@ def load_reference_audio(path, target_sr=24000):
     return np.asarray(audio, dtype=np.float32), sr
 
 
+# Fine-tunes that need a short voice reference. With the 13 s reference of ru_female_narrator the ru-stress model
+# said nothing, or stopped after a syllable, on all 18 takes of 9 sentences of 9-57 letters (with or without stress
+# marks; with the non-streaming text layout 1/18): 52 of the 487 chunks of the first story are that short.
+# With the first 5.6 s of the same reference it read all 18, with the durations of the base model, and medium and
+# long chunks as well. The base model reads short sentences fine with the whole reference (22/22).
+SHORT_REFERENCE_MODELS = ('siriusfreak/qwen3-tts-12hz-1.7b-ru-stress-cf',)
+
+
+def reference_cut(model_id, voice_profile):
+    """(seconds, transcript) of the short reference this model clones from, or None for the whole reference."""
+    if model_id in SHORT_REFERENCE_MODELS and voice_profile is not None:
+        return voice_profile.short_reference
+    return None
+
+
 def qwen_fingerprint(model_id, mode, language, speaker=None, instruct='', x_vector_only=False, gen_kwargs=None,
                      voice_profile=None):
     """Identity of the generated audio (used as cache key). Computable without loading the model."""
@@ -301,6 +346,9 @@ def qwen_fingerprint(model_id, mode, language, speaker=None, instruct='', x_vect
     if voice_profile is not None:
         parts['ref'] = file_sha1(voice_profile.audio_path)
         parts['ref_text'] = voice_profile.text
+        cut = reference_cut(model_id, voice_profile) if mode == 'clone' else None
+        if cut:
+            parts['ref_cut'] = list(cut)
     return 'qwen|' + json.dumps(parts, sort_keys=True, ensure_ascii=False)
 
 
@@ -368,6 +416,9 @@ class QwenEngine(Engine):
         self.model = self.fast.model if self.fast is not None else (model or load_qwen_model(self.model_id, self.device,
                                                                                                dtype))
         self.supports_batch = self.fast is None  # the CUDA-graph path generates one stream at a time
+        self._min_tokens = 0  # see token_floor
+        if self.fast is None:
+            install_min_tokens_hook(self.model, lambda: self._min_tokens)
         self.prompt = None
         self._ref_embedding = None
         self._cohort = None
@@ -377,10 +428,21 @@ class QwenEngine(Engine):
             if duration > 20:
                 print(f'\033[93mWarning: the reference audio is {duration:.0f}s long. Cloning is most reliable with '
                       f'6-15 seconds of clean speech; long references increase the failure rate.\033[0m')
-            self.prompt = self.model.create_voice_clone_prompt(
+            full = self.model.create_voice_clone_prompt(
                 ref_audio=(ref_audio, ref_sr), ref_text=voice_profile.text, x_vector_only_mode=x_vector_only)
+            self.prompt, self.ref_text = full, voice_profile.text
+            cut = reference_cut(self.model_id, voice_profile)
+            if cut:  # see SHORT_REFERENCE_MODELS
+                self.prompt = self.model.create_voice_clone_prompt(
+                    ref_audio=(ref_audio[:int(cut[0] * ref_sr)], ref_sr), ref_text=cut[1],
+                    x_vector_only_mode=x_vector_only)
+                self.ref_text = cut[1]
+            elif self.model_id in SHORT_REFERENCE_MODELS and duration > 8:
+                print(f'\033[93mWarning: {self.model_id} reads short sentences unreliably with a {duration:.0f}s '
+                      f'reference. Add "short_reference" (the first ~5-7 s, cut in a pause, and its transcript) to '
+                      f'the voice profile, as in the bundled ru_* narrators.\033[0m')
             try:
-                self._ref_embedding = self.prompt[0].ref_spk_embedding
+                self._ref_embedding = full[0].ref_spk_embedding  # voice check against the whole reference
             except Exception:
                 self._ref_embedding = None
 
@@ -399,6 +461,16 @@ class QwenEngine(Engine):
         seconds = count_letters(text) / slowest + 5.0
         return int(min(2048, max(96, seconds * QWEN_FRAME_RATE)))
 
+    def token_floor(self, text):
+        """
+        Codec tokens before the model may stop: the text read at twice the typical speed, which no real reading
+        reaches (the quality checks reject faster takes anyway). Without it the model can end a short sentence
+        after one syllable; the ru-stress fine-tune does that on most sentences under ~40 letters.
+        """
+        from audiblez.text import count_letters, language_profile
+        fastest = 2.0 * language_profile(self.language)['rate']
+        return max(2, int(count_letters(text) / fastest * QWEN_FRAME_RATE))
+
     def synthesize(self, texts, seed=0):
         texts = list(texts)
         seed_everything(seed)
@@ -412,6 +484,7 @@ class QwenEngine(Engine):
                 self.supports_batch = True
                 seed_everything(seed)
         kwargs = dict(self.gen_kwargs, max_new_tokens=max(self.token_budget(t) for t in texts))
+        self._min_tokens = min(self.token_floor(t) for t in texts)  # a batch shares one floor: the shortest text's
         languages = [self.qwen_language] * len(texts)
         if self.mode == 'clone':
             wavs, sr = self.model.generate_voice_clone(text=texts, language=languages, voice_clone_prompt=self.prompt,
@@ -427,10 +500,11 @@ class QwenEngine(Engine):
     def _synthesize_fast(self, texts):
         out = []
         for text in texts:
-            kwargs = dict(self.gen_kwargs, max_new_tokens=self.token_budget(text))
+            kwargs = dict(self.gen_kwargs, max_new_tokens=self.token_budget(text),
+                          min_new_tokens=self.token_floor(text))
             if self.mode == 'clone':
                 audio, sr = self.fast.generate_voice_clone(text=text, language=self.qwen_language,
-                                                           ref_text=self.voice_profile.text,
+                                                           ref_text=self.ref_text,
                                                            voice_clone_prompt=self.prompt, **kwargs)
             elif self.mode == 'custom':
                 audio, sr = self.fast.generate_custom_voice(text=text, speaker=self.speaker,
@@ -500,6 +574,8 @@ class QwenEngine(Engine):
         return len(wav) / self.sample_rate >= self.token_budget(text) / QWEN_FRAME_RATE - 0.5
 
     def describe(self):
-        who = {'clone': f'cloned voice {getattr(self.voice_profile, "path", None) or self.voice_profile.audio_path}',
+        cut = reference_cut(self.model_id, self.voice_profile) if self.mode == 'clone' else None
+        who = {'clone': f'cloned voice {getattr(self.voice_profile, "path", None) or self.voice_profile.audio_path}'
+                        + (f' (its first {cut[0]:.1f} s)' if cut else ''),
                'custom': f'speaker {self.speaker}', 'design': f'designed voice "{self.instruct}"'}[self.mode]
         return f'{self.model_id} ({self.qwen_language}, {self.backend} on {self.device}), {who}'

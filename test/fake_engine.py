@@ -9,7 +9,10 @@ SR = 24000
 
 
 class FakeEngine:
-    """'Speech' at the typical rate of the language. Texts containing 'Сбой'/'失敗' hallucinate on the first try."""
+    """
+    'Speech' at the typical rate of the language. Texts containing 'Сбой'/'失敗' hallucinate on the first try,
+    texts containing 'Тишина' never get any speech (only silence).
+    """
     name = 'fake'
     sample_rate = SR
     native_speed = False
@@ -35,6 +38,9 @@ class FakeEngine:
         rate = language_profile(self.language)['rate']
         for t in texts:
             self.seen[t] = self.seen.get(t, 0) + 1
+            if 'Тишина' in t:
+                out.append(np.zeros(SR, np.float32))
+                continue
             seconds = count_letters(t) / rate
             if ('Сбой' in t or '失敗' in t) and self.seen[t] == 1:
                 seconds *= 6  # hallucination on the first attempt

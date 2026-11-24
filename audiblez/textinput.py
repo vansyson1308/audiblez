@@ -332,6 +332,8 @@ def read_text_book(path):
         if title and docs[0].toc_title == files[0].stem:
             docs[0].toc_title = title
     title_from_file = not title  # a file name is a fine metadata title, but it is not read aloud
+    if title and len(files) == 1 and docs and docs[0].toc_title == files[0].stem:
+        docs[0].toc_title = title  # chapter name of a story without headings (m4b, YouTube timestamps)
     title = title or (path.name if path.is_dir() else path.stem)
     cover = meta.get('cover')
     cover_path = None

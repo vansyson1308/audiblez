@@ -137,6 +137,23 @@ class ChunkingTest(unittest.TestCase):
         self.assertEqual([c.text for c in chunks], ['Да. Нет. Может быть. Конечно.'])
         self.assertTrue(chunks[0].sentence_end)
 
+    def test_no_tiny_last_chunk(self):
+        intro = ('Добро пожаловать, дорогие слушатели. Сегодня вас ждёт история, которая начинается в старом '
+                 'деревянном доме на высоком волжском берегу, где осенью пахнет антоновкой и мокрыми досками. '
+                 'Это рассказ о женщине, которая приехала продать материнский дом и случайно нашла за старым '
+                 'буфетом двадцать семь неотправленных писем — и вместе с ними открыла человека, которого, как ей '
+                 'казалось, знала всю жизнь. Устраивайтесь поудобнее, налейте себе чаю, если за окном тоже '
+                 'непогода. Приятного прослушивания.')
+        chunks = chunk_paragraph(intro, 'ru', 300)
+        self.assertEqual(len(chunks), 3)  # greedy: 182 + 288 + 24 ("Приятного прослушивания." alone)
+        self.assertTrue(all(len(c.text) <= 300 and c.sentence_end for c in chunks))
+        self.assertTrue(all(len(c.text) >= 75 for c in chunks), [len(c.text) for c in chunks])
+        self.assertEqual(' '.join(c.text for c in chunks), intro)
+        self.assertTrue(chunks[-1].text.endswith('непогода. Приятного прослушивания.'))
+        # paragraphs without a tiny chunk are packed as before (their cached audio stays valid)
+        para = 'А' * 200 + '. ' + 'Б' * 150 + '.'
+        self.assertEqual([len(c.text) for c in chunk_paragraph(para, 'ru', 300)], [201, 151])
+
     def test_long_sentence_split_at_clause(self):
         parts = split_long_text('первая часть фразы довольно длинная; вторая часть фразы тоже длинная', 50)
         self.assertEqual(parts, ['первая часть фразы довольно длинная;', 'вторая часть фразы тоже длинная'])

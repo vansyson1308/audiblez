@@ -170,6 +170,13 @@ def number_words(n, text, start, end, suffix=None):
     # Dates: "7 мая" -> "седьмое мая" (ordinal neuter, case from the preposition)
     if 1 <= n <= 31 and noun is not None and noun.lemma in _MONTH_LEMMAS:
         return ordinal(n, case=prep or _date_case(text, start, end), gender='n')
+    # The year of a date written without "года": "14 ноября 1978" -> "... тысяча девятьсот семьдесят восьмого года"
+    if 100 <= n <= 2199 and (noun is None or noun.lemma != 'год') and _preceding_word(text, start) in _MONTHS_GEN:
+        return ordinal(n, case='g', gender='m') + ' года'
+    # "в 1978," with no noun after it: a year -> "в тысяча девятьсот семьдесят восьмом году"
+    if (1700 <= n <= 2199 and noun is None and _preceding_word(text, start) in ('в', 'во')
+            and re.match(r'[ \t]*(?:[,.;:!?…»)]|—|$)', text[end:])):
+        return ordinal(n, case='p', gender='m') + ' году'
     # Centuries and years are ordinals: "XIX век", "в 1812 году", "весной 1834 года", "в 1812 — 1815 годах"
     if noun is not None and ((not noun.plural and (noun.lemma == 'век' or (noun.lemma == 'год' and n >= 100)))
                              or (noun.plural and ((noun.lemma == 'год' and n >= 1000)
@@ -337,14 +344,14 @@ _YO_WORDS = (
     'шёл пришёл ушёл нашёл пошёл вошёл зашёл подошёл прошёл перешёл отошёл обошёл сошёл дошёл взошёл '
     'произошёл нашёлся вёл привёл увёл завёл отвёл подвёл провёл перевёл развёл навёл произвёл изобрёл '
     'приобрёл обрёл нёс принёс унёс занёс отнёс поднёс пронёс перенёс вёз привёз увёз отвёз завёз повёз грёб '
-    'плёл мёл цвёл расцвёл отцвёл лёг слёг прилёг залёг полёг жёг сжёг поджёг зажёг обжёг стёр растёр простёр '
+    'плёл цвёл расцвёл отцвёл лёг слёг прилёг залёг полёг жёг сжёг поджёг зажёг обжёг стёр растёр простёр '
     'стёрся упёрся замёрз мёрз щёлкнул щёлкнула щёлкнули щёлкнуть щёлкать щёлкает '
     'идёт идёшь идём идёте пойдёт пойдёшь пойдём пойдёте придёт придёшь придём придёте найдёт найдёшь найдём '
     'найдёте уйдёт уйдёшь уйдём уйдёте войдёт войдёшь войдём войдёте подойдёт подойдёшь подойдём подойдёте '
     'пройдёт пройдёшь пройдём пройдёте дойдёт дойдёшь дойдём дойдёте зайдёт зайдёшь зайдём зайдёте перейдёт '
     'перейдёшь перейдём обойдёт обойдёшь обойдём сойдёт сойдёшь сойдём отойдёт отойдёшь отойдём произойдёт '
     'найдётся придётся пройдётся обойдётся живёт живёшь живём живёте даёт даёшь даём даёте встаёт встаёшь '
-    'встаём встаёте поёт поёшь поём поёте пьёт пьёшь пьём пьёте льёт льёшь льём бьёт бьёшь бьём бьёте шьёт '
+    'встаём встаёте поёт поёшь поёте пьёт пьёшь пьём пьёте льёт льёшь льём бьёт бьёшь бьём бьёте шьёт '
     'вьёт жуёт плюёт клюёт куёт берёт берёшь берём берёте зовёт зовёшь зовём зовёте ждёт ждёшь ждём ждёте '
     'врёт врёшь врём ревёт ревёшь плывёт плывёшь плывём несёт несёшь несём несёте везёт везёшь везём ведёт '
     'ведёшь ведём ведёте растёт растёшь растём трясёт метёт плетёт цветёт гребёт кладёт кладёшь кладём '
@@ -462,6 +469,9 @@ _ABBREVIATIONS = [
     (r'\bтов\.(?=\s+[А-ЯЁ])', 'товарищ'), (r'\bP\.\s?S\.', 'постскриптум'), (r'\bок\.(?=\s+\d)', 'около'),
     (r'\bстр\.(?=\s*\d)', 'страница'), (r'\bгл\.(?=\s*[\dIVXLC])', 'глава'), (r'№\s*(?=\d)', 'номер '),
     (r'§\s*(?=\d)', 'параграф '), (r'(?<=\s)&(?=\s)', 'и'),
+    # addresses ("г. Мурманск, ул. Книповича, д. 14, кв. 5"); years ("1834 г.") are handled before
+    (r'(?<![\w.])г\.\s*(?=[А-ЯЁ][а-яё])', 'город '), (r'(?<![\w.])ул\.\s*(?=[А-ЯЁ])', 'улица '),
+    (r'(?<![\w.])д\.\s*(?=\d)', 'дом '), (r'(?<![\w.])кв\.\s*(?=\d)', 'квартира '),
 ]
 
 
@@ -499,6 +509,16 @@ _COMPOUND_SUFFIXES = (r'летн|лети|кратн|процентн|этажн
                       r'метров|километров|рублёв|рублев|комнатн|томн|серийн|местн|ствольн|зарядн|дюймов|ярусн')
 
 
+def postal_code_words(code):
+    """'183038' -> 'сто восемьдесят три ноль тридцать восемь' (read in two groups of three digits)."""
+    words = []
+    for group in (code[:3], code[3:]):
+        zeros = len(group) - len(group.lstrip('0'))
+        rest = group.lstrip('0')
+        words += ['ноль'] * zeros + ([cardinal(int(rest))] if rest else [])
+    return ' '.join(words)
+
+
 def _currency(sym, amount):
     forms = _CURRENCIES[sym]
     return forms[1] if re.search(r'[.,]', amount) else _plural_form(amount, forms)
@@ -512,6 +532,9 @@ def normalize_anonymized_years(text):
 
 def normalize_units(text):
     """Spell out unit, currency, year and century abbreviations (the numbers themselves are converted later)."""
+    # postal codes before a place: "183038, г. Мурманск" -> "сто восемьдесят три ноль тридцать восемь, г. Мурманск"
+    text = re.sub(r'(?<![\d\w])(\d{6})(?=\s*,\s*(?:г\.|город|гор\.|пос\.|посёлок|с\.|д\.|ул\.|пгт|обл|край|респ))',
+                  lambda m: _cap(m.string, m.start(), postal_code_words(m.group(1))), text)
     # arithmetic and phone numbers: "2+2", "+7 999" -> "2 плюс 2", "плюс 7 999"
     text = re.sub(r'(?<=\d)[ \t]*\+[ \t]*(?=\d)|(?<![\w+])\+(?=\d)', ' плюс ', text)
     # 1 000 000 -> 1000000
@@ -674,6 +697,28 @@ _KEEP_CAPS = {'США', 'ООН', 'ЕС', 'ОАЭ', 'ЮАР', 'КГБ', 'ЦРУ'
               'ГИБДД', 'ГАИ', 'НКВД', 'ДНК', 'ИП', 'ООО', 'ОАО', 'ЗАО', 'ЖКХ', 'ЕГЭ', 'ОГЭ', 'НАТО', 'ЮНЕСКО'}
 
 
+_LETTER_NAMES = {'Б': 'бэ', 'В': 'вэ', 'Г': 'гэ', 'Д': 'дэ', 'Ж': 'жэ', 'З': 'зэ', 'К': 'ка', 'Л': 'эль', 'М': 'эм',
+                 'Н': 'эн', 'П': 'пэ', 'Р': 'эр', 'С': 'эс', 'Т': 'тэ', 'Ф': 'эф', 'Х': 'ха', 'Ц': 'цэ', 'Ч': 'че',
+                 'Ш': 'ша', 'Щ': 'ща'}
+
+
+def spell_consonant_abbreviations(text, stress=False):
+    """
+    'СРЗ' -> 'эс-эр-зэ', 'МВД' -> 'эм-вэ-дэ': an abbreviation without vowels can only be read by its letter names,
+    which a TTS model may otherwise turn into an unpronounceable syllable. Abbreviations with vowels (США, БТИ, ВУЗ)
+    are left as written (use --lexicon for the ones read by letters, e.g. "БТИ = бэ-тэ-и").
+    """
+    def repl(m):
+        w = m.group(0)
+        if re.fullmatch(_ROMAN_TOKEN, w):  # ХХ, ХIX (Roman numerals typed with Cyrillic letters)
+            return w
+        names = [_LETTER_NAMES[c] for c in w]
+        if stress:  # letter abbreviations are stressed on their last letter: "эс-эр-зэ́"
+            names[-1] = re.sub(r'([аэе])', '\\1\u0301', names[-1], count=1)
+        return '-'.join(names)
+    return re.sub(r'(?<![\w-])[БВГДЖЗКЛМНПРСТФХЦЧШЩ]{2,5}(?![\w-])', repl, text)
+
+
 def strip_stress_marks(text):
     return text.replace('́', '').replace('̀', '')
 
@@ -740,6 +785,7 @@ def normalize_ru(text, is_heading=False, keep_stress=False):
     text = normalize_units(text)
     text = expand_abbreviations(text)
     text = normalize_numbers(text)
+    text = spell_consonant_abbreviations(text, stress=keep_stress)
     text = restore_yo(text)
     text = normalize_punctuation(text)
     return ensure_terminal_punctuation(text)
