@@ -97,14 +97,16 @@ Lỗi dễ nghe thấy nhất của TTS tiếng Nga là **đặt sai trọng âm
    (chạy trên CPU, ~10–100 ms mỗi câu, có cache; lần đầu tải ~1,5 GB model).
 2. Văn bản được đọc bằng [siriusfreak/qwen3-tts-12hz-1.7b-ru-stress-cf](https://huggingface.co/siriusfreak/qwen3-tts-12hz-1.7b-ru-stress-cf),
    bản fine-tune Apache-2.0 của chính Qwen3-TTS 1.7B được huấn luyện để **làm theo dấu trọng âm** (theo model card: 96–100%
-   so với 17–65% của model gốc). Cùng giọng clone, cùng tốc độ.
+   so với 17–65% của model gốc). Cùng giọng clone; trên cảnh thoại dùng để nghe thử, nó đọc chậm hơn model gốc
+   khoảng 8% (91 s so với 84 s).
 
 Thử trên bộ 24 câu có từ đồng hình (за́мок/замо́к, му́ки/муки́, бе́лки/белки́, доро́гой/дорого́й…), RUAccent đặt đúng cả 24
 khi mỗi câu có một từ đồng hình. Lưu ý:
 
 - RUAccent vẫn sai khoảng 2–3% số từ (số của tác giả model): sửa bằng `--lexicon` khi nghe thấy. Trên truyện đầu
   tiên (707 từ đồng hình) em đã rà tay từng từ: những lỗi lặp lại (по́няла → поняла́, у двери́ → у две́ри, руки́ →
-  ру́ки, по-моему́…) được audiblez tự sửa; phần đoán chữ ё cho từ đồng hình của RUAccent (лет → лёт, села → сёла,
+  ру́ки, по-моему́, và «не» bị đặt trọng âm 58/312 lần như не́ смогла́ → не смогла́, chỉ giữ не́ был/не́ было…) được
+  audiblez tự sửa; phần đoán chữ ё cho từ đồng hình của RUAccent (лет → лёт, села → сёла,
   небо → нёбо) đã bị tắt vì sai cả 16/16 lần. Lỗi riêng của từng truyện (tên riêng, một từ đồng hình trong câu
   lạ) ghi vào `tu_dien.txt`, vd. `Замок был старый = Замо́к был старый`, `re:\bШуман(а|у|ом|е)?\b = Шу́ман\1`.
 - **Bản fine-tune này cần giọng mẫu ngắn.** Với giọng mẫu 13 giây của `ru_female_narrator`, nó im lặng hoặc dừng sau
