@@ -1,0 +1,11 @@
+{
+  "source": "qwen3-tts voice design",
+  "instruct": "A deep, warm male voice, about 40 years old, native Korean speaker with standard Seoul pronunciation. Professional audiobook narrator: calm, expressive, natural intonation, clear diction, moderate pace.",
+  "seed": 1,
+  "audio": "reference.flac",
+  "text": "방 안은 너무 조용해서 옆방의 시계 소리까지 들렸다. \"정말 그가 돌아올 거라고 생각해?\" 그녀가 작은 목소리로 물었다. 나는 아무 대답도 하지 못했다. 창밖은 이미 밝아 오고 있었다.",
+  "language": "ko",
+  "duration": 14.71,
+  "name": "ko_male_narrator",
+  "license": "Generated with Qwen3-TTS-12Hz-1.7B-VoiceDesign (Apache-2.0); synthetic voice, not a real person"
+}

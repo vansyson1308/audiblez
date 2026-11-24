@@ -143,7 +143,8 @@ def synthesize_parallel(devices, choice, settings, work_dir, language, jobs, tot
             rate = (done_chars - already_done) / max(elapsed, 1e-6)
             eta = strfdelta((total_chars - done_chars) / max(rate, 1e-6))
             pct = min(100, done_chars * 100 // max(1, total_chars))
-            log(f'Progress: {pct}%  |  {rate:.0f} chars/s  |  {synth_audio / max(elapsed, 1e-6):.2f}x real time '
+            speed = synth_audio / max(elapsed, 1e-6)
+            log(f'Progress: {pct}%  |  {rate:.{0 if rate >= 10 else 1}f} chars/s  |  {speed:.2f}x real time '
                 f'(all workers)  |  ETA {eta}')
             if stats is not None:
                 stats.processed_chars, stats.progress, stats.eta = done_chars, pct, eta

@@ -1,4 +1,5 @@
 """Japanese / Korean text input and normalization, and original-content (.txt/.md) sources."""
+import importlib.util
 import shutil
 import tempfile
 import unittest
@@ -39,11 +40,31 @@ class JapaneseTextTest(unittest.TestCase):
 
     def test_normalization(self):
         cases = [('「待って！！」', '「待って！」'), ('あ〜、そうか……', 'あー、そうか……'),
-                 ('【鑑定】スキルを使った', '鑑定スキルを使った。'), ('２０２６年、ＡＩが　世界を変えた', '2026年、AIが世界を変えた。'),
-                 ('それは――', 'それは……'), ('ｶﾞｯｺｳに行く', 'ガッコウに行く。'), ('星が綺麗だ♪', '星が綺麗だ。')]
+                 ('【鑑定】スキルを使った', '鑑定スキルを使った。'), ('ＡＩが　世界を変えた', 'AIが世界を変えた。'),
+                 ('それは――', 'それは……'), ('ｶﾞｯｺｳに行く', 'ガッコウに行く。'), ('星が綺麗だ♪', '星が綺麗だ。'),
+                 ('「一緒に星を見るって」', '「一緒に星を見るって」。')]  # final 。: stop cue for the model
         for src, expected in cases:
             self.assertEqual(normalize_text(src, 'ja'), expected, src)
         self.assertEqual(normalize_text('第一章　旅立ち', 'ja', is_heading=True), '第一章、旅立ち。')
+
+    def test_emphasis_dots_and_consecutive_dialogue(self):
+        self.assertEqual(convert_ruby('｜傍《・》点と颯《はやて》'), '傍点とはやて')
+        self.assertEqual(split_sentences('「待って」「行かないで」彼女は泣いた。', 'ja'), ['「待って」', '「行かないで」彼女は泣いた。'])
+
+    @unittest.skipUnless(importlib.util.find_spec('pyopenjtalk'), 'pyopenjtalk-plus not installed')
+    def test_numbers_with_counters_read_in_hiragana(self):
+        cases = [('3本のペンを持って、4人で出かけた。', 'さんぼんのペンを持って、よにんで出かけた。'),
+                 ('2026年4月14日、午後7時30分に会おう', 'にせんにじゅうろくねんしがつじゅうよっか、午後しちじさんじゅっぷんに会おう。'),
+                 ('１ヶ月で５０％も増えた', 'いっかげつでごじゅっパーセントも増えた。'), ('二十日に二十歳になった', 'はつかにはたちになった。'),
+                 ('3.5キロ歩いた', 'さんてんごキロ歩いた。'), ('1人と2人', 'ひとりとふたり。')]
+        for src, expected in cases:
+            self.assertEqual(normalize_text(src, 'ja'), expected, src)
+        self.assertEqual(normalize_text('間章　夜明け', 'ja', is_heading=True), 'かんしょう、夜明け。')
+
+    def test_whisper_hallucinations_are_ignored(self):
+        from audiblez.audio import strip_whisper_hallucinations
+        self.assertEqual(strip_whisper_hallucinations('雨が降っていた。ご視聴ありがとうございました', '雨が降っていた。'), '雨が降っていた。')
+        self.assertEqual(strip_whisper_hallucinations('그는 떠났다. 시청해주셔서 감사합니다', '그는 떠났다.'), '그는 떠났다.')
 
     def test_lexicon_matches_inside_japanese_text(self):
         with tempfile.TemporaryDirectory() as d:
@@ -73,7 +94,8 @@ class KoreanTextTest(unittest.TestCase):
                  ('1시간 30분', '한 시간 삼십 분'), ('5,000원', '오천 원'), ('50%', '오십 퍼센트'),
                  ('3.5킬로미터', '삼 점 오 킬로미터'), ('3번째 방', '세 번째 방'), ('10월 9일', '시월 구 일'),
                  ('12층', '십이 층'), ('15000원', '만 오천 원'), ('123456789', '일억 이천삼백사십오만 육천칠백팔십구'),
-                 ('2개월', '두 개월'), ('99마리', '아흔아홉 마리'), ('제3장', '제삼 장'), ('1990년대', '천구백구십 년대')]
+                 ('2개월', '이 개월'), ('99마리', '아흔아홉 마리'), ('제3장', '제삼장'), ('1990년대', '천구백구십 년대'),
+                 ('3번지', '삼 번지'), ('2배', '두 배'), ('영화 3편', '영화 세 편'), ('제2편', '제이편')]
         for src, expected in cases:
             self.assertEqual(n(src), expected, src)
         self.assertEqual(normalize_text('"정말?"', 'ko'), '"정말?"')

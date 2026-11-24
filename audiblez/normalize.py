@@ -83,8 +83,12 @@ def _ends_sentence(text, terminals):
 
 
 def normalize_ja(text, is_heading=False):
+    from audiblez.normalize_ja import normalize_heading_words_ja, normalize_numbers_ja
     text = unicodedata.normalize('NFC', text)
     text = _halfwidth_katakana_to_fullwidth(_fullwidth_alnum_to_ascii(text))
+    if is_heading:
+        text = normalize_heading_words_ja(text)
+    text = normalize_numbers_ja(text.replace('％', '%'))  # numbers + counters: risky readings -> hiragana
     text = re.sub(r'(?:\.{3,}|・{3,}|…+)', '……', text)
     text = re.sub(r'[―—–]{1,}', '……', text)  # 「それは――」: a hesitation / trailing off
     text = re.sub(r'(?<=[\u3040-\u30ffー])[〜～~]+', 'ー', text)  # 「あ〜」 -> 「あー」 (elongation)
@@ -99,6 +103,8 @@ def normalize_ja(text, is_heading=False):
                   text)  # no spaces inside Japanese text
     text = re.sub(r'\s{2,}', ' ', text).strip()
     if text and not _ends_sentence(text, '。！？!?…'):
+        # also after a closing quote (「…見るって」。): the final 。 is the model's cue to finish the sentence; without
+        # it the ending of such a line was clipped in our tests (caught by the Whisper check, but a retry costs time)
         text += '。'
     return text
 

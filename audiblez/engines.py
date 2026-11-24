@@ -351,6 +351,7 @@ class QwenEngine(Engine):
         self.supports_batch = self.fast is None  # the CUDA-graph path generates one stream at a time
         self.prompt = None
         self._ref_embedding = None
+        self._cohort = None
         if mode == 'clone':
             ref_audio, ref_sr = load_reference_audio(voice_profile.audio_path)
             duration = len(ref_audio) / ref_sr
@@ -432,16 +433,48 @@ class QwenEngine(Engine):
                     for w in wavs]
         return [np.asarray(w, dtype=np.float32).reshape(-1) for w in wavs]
 
+    def _speaker_embedding(self, wav):
+        import torch
+        with torch.no_grad():
+            emb = self.model.model.extract_speaker_embedding(audio=np.ascontiguousarray(wav, dtype=np.float32),
+                                                             sr=24000)
+        return emb.flatten().float()
+
+    def _cohort_mean(self):
+        """
+        Mean speaker embedding of the bundled narrators (computed once). Raw cosine similarities of this speaker
+        encoder are all high: 0.92-0.99 between *different* voices, 0.97-0.99 for correct takes. Subtracting the
+        cohort mean makes them discriminative: on 48 Russian takes of ru_male_narrator the centered similarity is
+        0.38-0.81 with the narrator, -0.67..-0.08 with the female voices and up to 0.47 with the other male voices;
+        Japanese and Korean takes of ja_male_narrator / ko_male_narrator measured 0.41-0.81 and 0.45-0.77.
+        """
+        if self._cohort is None:
+            import torch
+            embs = []
+            for name in list_bundled_voices():
+                try:
+                    wav, _ = load_reference_audio(find_voice_profile(name).audio_path)
+                    embs.append(self._speaker_embedding(wav).cpu())
+                except Exception:
+                    continue
+            self._cohort = torch.stack(embs).mean(0) if len(embs) >= 3 else False
+        return None if self._cohort is False else self._cohort
+
     def speaker_similarity(self, wav):
-        """Cosine similarity between the take and the reference narrator, with the model's own speaker encoder."""
+        """
+        Cohort-centered cosine similarity between the take and the reference narrator, with the model's own
+        speaker encoder (see _cohort_mean). Catches takes where the clone drifted to another voice or gender.
+        """
         if self._ref_embedding is None or len(wav) < self.sample_rate // 2:
             return None
         import torch
-        model = self.model.model
-        with torch.no_grad():
-            emb = model.extract_speaker_embedding(audio=np.ascontiguousarray(wav, dtype=np.float32), sr=24000)
-            ref = self._ref_embedding.to(emb.device)
-            return float(torch.nn.functional.cosine_similarity(emb.flatten().float(), ref.flatten().float(), dim=0))
+        mean = self._cohort_mean()
+        if mean is None:
+            return None
+        emb = self._speaker_embedding(wav)
+        ref = self._ref_embedding.flatten().float().to(emb.device)
+        mean = mean.to(emb.device)
+        return float(torch.nn.functional.cosine_similarity(emb - mean, ref - mean, dim=0))
 
     def hit_token_limit(self, wav, text):
         """True if the generation was most likely cut by max_new_tokens (runaway / looping output)."""

@@ -404,7 +404,8 @@ _BOUNDARY_RE = re.compile(
     r'(\s+)'                               # whitespace
     r'(?=[«"“„(\[—–\-]?\s*[^\W\d_]|[«"“„(\[]?\d)',  # next sentence starts (optionally with quote or dialogue dash)
 )
-_CJK_BOUNDARY_RE = re.compile(r'([。！？!?…]+[」』”"’）)]*)')
+# sentence ends, and consecutive dialogue lines 「…」「…」 even without 。
+_CJK_BOUNDARY_RE = re.compile(r'([。！？!?…]+[」』”"’）)]*|[」』](?=[「『]))')
 
 
 def _word_before(text: str, end: int) -> str:

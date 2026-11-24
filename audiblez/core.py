@@ -612,18 +612,7 @@ class Synthesizer:
             still = []
             for k, wav in zip(pending, raw):
                 text = texts[k]
-                cleaned = clean_chunk(wav, sr)
-                hit = bool(getattr(self.engine, 'hit_token_limit', None) and self.engine.hit_token_limit(wav, text))
-                qa = analyze_chunk(cleaned, sr, text, self.qa_cfg, raw_wav=wav, hit_token_limit=hit)
-                if self.settings.qa and qa.ok:
-                    self._check_voice(cleaned, sr, qa)
-                if self.settings.qa and self.verifier is not None and qa.ok:
-                    try:
-                        self.verifier.check(cleaned, sr, text, self.qa_cfg, qa)
-                    except Exception as e:
-                        self.log(f'ASR check failed: {e}')
-                if not self.settings.qa:
-                    qa.ok, qa.reasons = True, []
+                cleaned, qa = self.evaluate(wav, text)
                 if k not in best or qa.score < best[k][0]:
                     best[k] = (qa.score, cleaned, qa)
                 if not qa.ok and attempt < self.qa_cfg.max_retries:
@@ -649,6 +638,30 @@ class Synthesizer:
             elif self.key(text) in self.failed_keys:
                 self.failed_keys.discard(self.key(text))
             self._progress(len(text), cached=False)
+
+    def evaluate(self, wav, text):
+        """Clean a raw take and run every quality check on it. Returns (cleaned audio, QAResult)."""
+        sr = self.engine.sample_rate
+        wav = np.asarray(wav, dtype=np.float32)
+        finite = bool(np.isfinite(wav).all())
+        if not finite:  # numeric overflow (e.g. float16 on some GPUs)
+            wav = np.nan_to_num(wav, nan=0.0, posinf=0.0, neginf=0.0)
+        cleaned = clean_chunk(wav, sr)
+        hit = bool(getattr(self.engine, 'hit_token_limit', None) and self.engine.hit_token_limit(wav, text))
+        qa = analyze_chunk(cleaned, sr, text, self.qa_cfg, raw_wav=wav, hit_token_limit=hit)
+        if not finite:
+            qa.ok = False
+            qa.reasons.insert(0, 'invalid samples (NaN/inf: numeric overflow)')
+        if self.settings.qa and qa.ok:
+            self._check_voice(cleaned, sr, qa)
+        if self.settings.qa and self.verifier is not None and qa.ok:
+            try:
+                self.verifier.check(cleaned, sr, text, self.qa_cfg, qa)
+            except Exception as e:
+                self.log(f'ASR check failed: {e}')
+        if not self.settings.qa:
+            qa.ok, qa.reasons = True, []
+        return cleaned, qa
 
     def _check_voice(self, wav, sr, qa):
         """Speaker-similarity gate: the take must sound like the reference narrator."""
@@ -680,7 +693,7 @@ class Synthesizer:
             self.post_event('CORE_PROGRESS', stats=s)
         if not cached:
             speed = f' | {s.synth_audio / s.synth_seconds:.2f}x real time' if s.synth_seconds > 0 else ''
-            self.log(f'Progress: {s.progress}%  |  {rate:.0f} chars/s{speed}  |  ETA {s.eta}')
+            self.log(f'Progress: {s.progress}%  |  {rate:.{0 if rate >= 10 else 1}f} chars/s{speed}  |  ETA {s.eta}')
 
 
 def new_stats(total_chars):
@@ -777,7 +790,9 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
     # Audiobook chapters: documents split at chapter headings
     chapters: List[PlannedChapter] = []
     for doc in selected_chapters:
-        for section in document_sections(doc, min_chars=int(25 * profile['rate'])):
+        # EPUBs: merge tiny sections (title pages such as "Part One"); own texts: every heading is a chapter
+        min_chars = int(25 * profile['rate']) if source.kind == 'epub' else 1
+        for section in document_sections(doc, min_chars=min_chars):
             segs = plan_section(section, language, max_chars, settings, lexicon)
             if not segs:
                 continue

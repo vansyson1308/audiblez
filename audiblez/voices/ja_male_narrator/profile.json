@@ -1,0 +1,11 @@
+{
+  "source": "qwen3-tts voice design",
+  "instruct": "A deep, warm male voice, about 40 years old, native Japanese speaker with standard Tokyo pronunciation. Professional audiobook narrator (rōdoku): expressive, natural intonation, clear diction, natural conversational pace, not slow.",
+  "seed": 14,
+  "audio": "reference.flac",
+  "text": "静かな夜だった。「本当に、彼は帰ってくると思う？」彼女は小さな声で尋ねた。僕は何も答えられなかった。",
+  "language": "ja",
+  "duration": 12.0,
+  "name": "ja_male_narrator",
+  "license": "Generated with Qwen3-TTS-12Hz-1.7B-VoiceDesign (Apache-2.0); synthetic voice, not a real person"
+}

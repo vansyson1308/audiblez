@@ -190,7 +190,11 @@ class QAConfig:
     min_rate: float = 5.0   # letters per second below which the take is suspicious (hallucination / looping)
     max_rate: float = 25.0  # letters per second above which words were probably skipped
     max_cer: float = 0.25   # maximum character error rate against the ASR transcript
-    min_similarity: float = 0.5  # minimum speaker similarity with the reference voice (voice cloning)
+    # Minimum cohort-centered speaker similarity with the reference voice (voice cloning, see
+    # QwenEngine.speaker_similarity). Correct takes measured 0.38-0.81 in Russian, Japanese and Korean (0.26+ on
+    # 1.2 s excerpts), takes in another gender's voice below -0.08: 0.15 catches a voice flip without regenerating
+    # good takes.
+    min_similarity: float = 0.15
     max_retries: int = 3
 
 
@@ -229,8 +233,13 @@ def _to_katakana(text):
 
 
 def japanese_reading(text):
-    """Katakana reading of a Japanese text (fugashi + unidic-lite when installed), to compare a Whisper transcript
-    with the source fairly: the text may say はやて where Whisper writes 颯, or the other way around."""
+    """Katakana reading of a Japanese text (pyopenjtalk, else fugashi + unidic-lite), to compare a Whisper transcript
+    with the source fairly: Whisper writes 颯 where the text says はやて, and writes the right kanji even when the TTS
+    misread them, so only a comparison of readings is meaningful."""
+    from audiblez.normalize_ja import reading
+    kana = reading(text)
+    if kana:
+        return _to_katakana(kana)
     global _JA_TAGGER
     if _JA_TAGGER is None:
         try:
@@ -287,6 +296,21 @@ def char_error_rate(reference, hypothesis, lang='en'):
     return levenshtein(ref, hyp) / len(ref)
 
 
+# Phrases Whisper invents on silence or short clips (trained on subtitled videos)
+_WHISPER_HALLUCINATIONS = [
+    'ご視聴ありがとうございました', 'ご視聴ありがとうございます', 'チャンネル登録', '字幕', '最後までご視聴',
+    '시청해주셔서 감사합니다', '시청해 주셔서 감사합니다', '구독과 좋아요', 'MBC 뉴스', 'KBS 뉴스', '자막',
+    'Субтитры', 'Редактор субтитров', 'Продолжение следует', 'Thanks for watching', 'Subtitles by',
+]
+
+
+def strip_whisper_hallucinations(transcript, reference):
+    for phrase in _WHISPER_HALLUCINATIONS:
+        if phrase in transcript and phrase not in reference:
+            transcript = transcript.replace(phrase, ' ')
+    return re.sub(r'\s{2,}', ' ', transcript).strip()
+
+
 class AsrVerifier:
     """Transcribes synthesized chunks with faster-whisper and measures the character error rate."""
 
@@ -317,7 +341,7 @@ class AsrVerifier:
     def check(self, wav, sr, text, qa: QAConfig, result: QAResult):
         if count_letters(text) < 20:  # Whisper itself is unreliable on very short clips
             return result
-        transcript = self.transcribe(wav, sr)
+        transcript = strip_whisper_hallucinations(self.transcribe(wav, sr), text)
         # Whisper writes "в 1812 году" while our text says "в тысяча восемьсот двенадцатом году": normalize both
         from audiblez.normalize import normalize_text
         try:

@@ -18,13 +18,13 @@ _NATIVE_TENS = {1: '열', 2: '스물', 3: '서른', 4: '마흔', 5: '쉰', 6: '�
 _NATIVE_COUNTERS = sorted([
     '번째', '시간', '사람', '마리', '그릇', '켤레', '송이', '자루', '가지', '군데', '걸음', '바퀴', '개', '명', '살', '시',
     '번', '권', '잔', '병', '대', '채', '벌', '장', '곳', '달', '줄', '통', '쌍', '알', '포기', '덩이', '조각', '방울',
-    '모금', '숟가락', '봉지', '상자', '박스', '접시', '척', '그루', '자리',
+    '모금', '숟가락', '봉지', '상자', '박스', '접시', '척', '그루', '자리', '배', '편',
 ], key=len, reverse=True)
 # counters read with Sino-Korean numbers (also the default)
 _SINO_COUNTERS = sorted([
     '개월', '년', '월', '일', '주', '분', '초', '원', '층', '호', '회', '학년', '세', '도', '퍼센트', '킬로그램', '킬로미터',
     '킬로', '미터', '센티미터', '센티', '밀리', '그램', '리터', '쪽', '페이지', '화', '등', '위', '차', '년대', '세기', '인분',
-    '달러', '엔', '위안', '유로', '평', '인치', '배', '점', '번지', '동', '편',
+    '달러', '엔', '위안', '유로', '평', '인치', '점', '번지', '동',
 ], key=len, reverse=True)
 _MONTHS = {6: '유월', 10: '시월'}  # 6월 and 10월 drop a final consonant
 
@@ -80,7 +80,8 @@ def _decimal(s: str) -> str:
     return sino(int(whole)) + ' 점 ' + ''.join(_SINO_DIGITS[int(d)] or '영' for d in frac)
 
 
-_COUNTER_RE = '|'.join(map(re.escape, _NATIVE_COUNTERS + _SINO_COUNTERS))
+# longest first across both lists: 2개월 is 이 개월 (Sino-Korean 개월), not 두 개 + 월; 3번지 is 삼 번지
+_COUNTER_RE = '|'.join(map(re.escape, sorted(set(_NATIVE_COUNTERS + _SINO_COUNTERS), key=len, reverse=True)))
 _NUMBER_RE = re.compile(rf'(?<![\d.,])(\d{{1,3}}(?:,\d{{3}})+|\d+)(\.\d+)?(\s?)({_COUNTER_RE}|%)?')
 
 
@@ -98,8 +99,9 @@ def _replace(m: re.Match, heading=False) -> str:
         return sino(n) + space
     if counter == '월' and n in _MONTHS:
         return _MONTHS[n]
-    ordinal_prefix = m.string[max(0, m.start() - 1):m.start()] == '제'  # 제3장 -> 제삼 장 (always Sino-Korean)
-    if counter in _NATIVE_COUNTERS and 1 <= n <= 99 and not ordinal_prefix and not heading:
+    if m.string[max(0, m.start() - 1):m.start()] == '제':  # ordinal: 제3장 -> 제삼장, 제1화 -> 제일화 (one word)
+        return sino(n) + counter
+    if counter in _NATIVE_COUNTERS and 1 <= n <= 99 and not heading:
         return native(n) + ' ' + counter
     return sino(n) + ' ' + counter
 

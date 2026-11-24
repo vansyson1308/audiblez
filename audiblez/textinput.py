@@ -113,7 +113,10 @@ _KANA = r'[ぁ-ゟ゠-ヿー]'
 
 def convert_ruby(text, mode='reading'):
     """Narou / Kakuyomu / Aozora furigana -> the reading (mode='reading') or the base text (mode='base')."""
-    pick = (lambda base, reading: reading) if mode == 'reading' else (lambda base, reading: base)
+    def pick(base, reading):
+        if mode != 'reading' or re.fullmatch(r'[・﹅﹆•●◦。、]+', reading):  # ｜傍《・》: emphasis dots, not a reading
+            return base
+        return reading
     text = re.sub(r'［＃[^］\n]*］', '', text)  # Aozora annotations
     text = re.sub(r'《《([^《》\n]+)》》', r'\1', text)  # emphasis dots (傍点)
     text = re.sub(r'[｜|]([^｜|《》\n]{1,40})《([^《》\n]{1,40})》', lambda m: pick(m.group(1), m.group(2)), text)

@@ -175,6 +175,20 @@ class PipelineTest(unittest.TestCase):
         engine = QwenEngine(mode='custom', language='ja', speaker='Ono_Anna', instruct='優しく', model=DummyModel())
         self.assertEqual(core.engine_fingerprint(choice, settings), (engine.name, engine.fingerprint()))
 
+    def test_benchmark(self):
+        """--benchmark times the configurations of this device and runs the quality checks on every take."""
+        from audiblez.bench import acceptable, run_benchmark
+        settings = core.Settings(asr='off', device='cpu', engine_factory='fake_engine:create_engine')
+        logs = []
+        res = run_benchmark(self.epub, settings, output_folder=self.tmp / 'out', n_chunks=4, log=logs.append)
+        self.assertEqual((res['dtype'], res['backend'], res['batch_size']), ('float32', 'qwen-tts', 1))
+        self.assertEqual(res['failures'], 0)
+        self.assertTrue(any(line.startswith('\nFastest: --backend qwen-tts --batch-size 1 --dtype float32')
+                            for line in logs), logs)
+        # a precision whose takes fail the checks is never recommended, even when it is faster
+        results = [dict(speed=1.0, failures=0), dict(speed=2.0, failures=1), dict(speed=3.0, failures=4)]
+        self.assertEqual(max(acceptable(results), key=lambda r: r['speed'])['speed'], 2.0)
+
     def test_chapter_selection(self):
         res = core.main(self.epub, output_folder=self.tmp / 'out',
                         settings=core.Settings(dry_run=True, chapters='2-3'))
