@@ -114,6 +114,7 @@ def read_book(file_path):
     title = meta_title[0][0].strip() if meta_title else ''
     meta_creator = book.get_metadata('DC', 'creator')
     creator = meta_creator[0][0].strip() if meta_creator else ''
+    creator = re.sub(r'^\s*(?:автор|авторы|author|by)\s*[:\-—]?\s+', '', creator, flags=re.I)  # "автор Пушкин"
     meta_lang = book.get_metadata('DC', 'language')
     language = meta_lang[0][0].strip().lower()[:2] if meta_lang and meta_lang[0][0] else None
     return book, title, creator, language
@@ -328,7 +329,6 @@ def plan_section(section: Section, language, max_chars, settings: Settings, lexi
 
 def intro_segments(title, creator, language, max_chars, settings, lexicon=None):
     segs = []
-    creator = re.sub(r'^\s*(?:автор|авторы|author|by)\s*[:\-—]?\s+', '', creator or '', flags=re.I)
     for t in (title, creator):
         if t:
             text = normalize_text(t, language, is_heading=False, lexicon=lexicon, enabled=settings.normalize)
