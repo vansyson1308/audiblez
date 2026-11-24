@@ -129,6 +129,12 @@ def recommend(results):
 
 
 def main(argv=None):
+    """Console entry point: exit code 0 when a usable configuration was found, 1 otherwise."""
+    return 0 if run(argv) is not None else 1
+
+
+def run(argv=None):
+    """Run the benchmark; returns the recommended configuration (dict) or None."""
     from audiblez import ensure_utf8_stdio
     ensure_utf8_stdio()
     p = argparse.ArgumentParser(prog='audiblez-bench', description=__doc__,
@@ -237,4 +243,4 @@ def _print_row(r):
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
