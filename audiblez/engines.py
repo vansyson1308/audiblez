@@ -47,8 +47,10 @@ def resolve_dtype(dtype, device):
     if dtype and dtype != 'auto':
         return {'bfloat16': torch.bfloat16, 'bf16': torch.bfloat16, 'float16': torch.float16, 'fp16': torch.float16,
                 'float32': torch.float32, 'fp32': torch.float32}[dtype]
-    if device.startswith('cuda') and torch.cuda.is_bf16_supported():
-        return torch.bfloat16  # Ampere (RTX 30xx) and newer
+    # Native bf16 only (Ampere / RTX 30xx and newer). is_bf16_supported() also reports *emulated* bf16 on older GPUs
+    # such as the T4 (Kaggle, Colab), which is slow there.
+    if device.startswith('cuda') and torch.cuda.get_device_capability()[0] >= 8:
+        return torch.bfloat16
     # float16 can overflow in this model (NaN -> noise); float32 is the safe default on older GPUs (e.g. T4),
     # Apple MPS and CPU. Force --dtype float16 to trade safety for speed/VRAM.
     return torch.float32
