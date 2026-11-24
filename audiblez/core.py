@@ -740,7 +740,7 @@ def assemble_chapter(segments: List[Segment], audios, sr, scale=1.0):
 # ---------------------------------------------------------------------------------------------------------------------
 
 def load_source(file_path):
-    """EPUB, .txt/.md file or folder -> title, author, language, cover bytes, documents (chapter sources)."""
+    """EPUB, FB2, DOCX, .txt/.md file or folder -> title, author, language, cover bytes, documents."""
     path = Path(file_path)
     if path.is_file() and path.suffix.lower() == '.epub':
         book, title, creator, language = read_book(path)
@@ -750,6 +750,11 @@ def load_source(file_path):
         docs = find_document_chapters_and_extract_texts(book, ruby='reading' if language == 'ja' else 'base')
         return SimpleNamespace(kind='epub', title=title, creator=creator, language=language,
                                cover=cover_item.get_content() if cover_item else b'', documents=docs)
+    from audiblez.formats import is_docx, is_fb2, read_docx, read_fb2
+    if path.is_file() and is_fb2(path):
+        return read_fb2(path)
+    if path.is_file() and is_docx(path):
+        return read_docx(path)
     from audiblez.textinput import TEXT_EXTENSIONS, read_text_book
     if path.is_dir() or (path.is_file() and path.suffix.lower() in TEXT_EXTENSIONS):
         meta, docs = read_text_book(path)
@@ -758,7 +763,8 @@ def load_source(file_path):
                                language=meta.get('language'), cover=cover, documents=docs)
     if not path.exists():
         raise SystemExit(f'File not found: {path}')
-    raise SystemExit(f'Unsupported input {path}: use an .epub, .txt or .md file, or a folder of .txt/.md files')
+    raise SystemExit(f'Unsupported input {path}: use an .epub, .fb2, .docx, .txt or .md file, or a folder of '
+                     f'.txt/.md files')
 
 
 def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.',
@@ -774,6 +780,8 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
     output_folder = Path(output_folder)
     output_folder.mkdir(parents=True, exist_ok=True)
     stem = file_path.stem if file_path.is_file() else file_path.name
+    if file_path.name.lower().endswith('.fb2.zip'):
+        stem = file_path.name[:-len('.fb2.zip')]
 
     source = load_source(file_path)
     title, creator, book_language, cover_image = source.title, source.creator, source.language, source.cover
@@ -781,8 +789,8 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
     if not selected_chapters:
         if pick_manually:
             selected_chapters = pick_chapters(document_chapters)
-        elif source.kind == 'text':
-            selected_chapters = list(document_chapters)  # the author's own files: read everything
+        elif source.kind in ('text', 'fb2'):
+            selected_chapters = list(document_chapters)  # own files, FB2 bodies: read everything
         else:
             selected_chapters = find_good_chapters(document_chapters)
     print_selected_chapters(document_chapters, selected_chapters)
@@ -800,7 +808,7 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
     chapters: List[PlannedChapter] = []
     for doc in selected_chapters:
         # EPUBs: merge tiny sections (title pages such as "Part One"); own texts: every heading is a chapter
-        min_chars = int(25 * profile['rate']) if source.kind == 'epub' else 1
+        min_chars = int(25 * profile['rate']) if source.kind in ('epub', 'fb2') else 1
         for section in document_sections(doc, min_chars=min_chars):
             segs = plan_section(section, language, max_chars, settings, lexicon)
             if not segs:

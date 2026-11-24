@@ -28,7 +28,8 @@ def build_parser():
     parser = argparse.ArgumentParser(prog='audiblez', epilog=EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter,
                                      description='Generate audiobooks from e-books (epub to m4b / YouTube mp4).')
     parser.add_argument('epub_file_path', metavar='BOOK',
-                        help='An .epub, a .txt / .md file, or a folder of .txt / .md files (one per chapter)')
+                        help='An .epub / .fb2 / .docx, a .txt / .md file, or a folder of .txt / .md files '
+                             '(one per chapter)')
     parser.add_argument('-o', '--output', default='.', help='Output folder for the audiobook and temporary files',
                         metavar='FOLDER')
     parser.add_argument('-p', '--pick', default=False, action='store_true',
