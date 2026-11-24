@@ -76,6 +76,21 @@ class StressHelpersTest(unittest.TestCase):
                          'ПОНЯЛА́, Гу́бы')  # a mark that was already in the text (lexicon) is kept
         self.assertEqual(apply_corrections('один два', 'од+ин'), 'од+ин')  # words do not line up: unchanged
 
+    def test_stress_on_ne(self):
+        """«не» is stressed only before был/было/дали/жил... (which lose their stress) and in «не́ за что»."""
+        from audiblez.stress_ru import apply_corrections
+        cases = [
+            ('она не смогла', 'он+а н+е смогл+а', 'она́ не смогла́'),
+            ('Не хочу, не в духе', 'Н+е хоч+у, н+е в д+ухе', 'Не хочу́, не в ду́хе'),
+            ('здесь не было никого', 'зд+есь н+е б+ыло никог+о', 'зде́сь не́ было никого́'),
+            ('он не был дома', '+он н+е был д+ома', 'о́н не́ был до́ма'),
+            ('не за что, не с кем', 'н+е за что, н+е с к+ем', 'не́ за что, не́ с ке́м'),
+            ('не понял', 'не п+онял', 'не по́нял'),  # unstressed не: left as it is
+            ('не+ смогла', 'н+е смогл+а', 'не́ смогла́'),  # a mark from the text or the lexicon is kept
+        ]
+        for src, ruaccent, expected in cases:
+            self.assertEqual(plus_to_acute(apply_corrections(src, ruaccent)), expected, src)
+
     def test_cer_ignores_stress_marks(self):
         self.assertEqual(char_error_rate('Ве́чером за́мок опусте́л.', 'Вечером замок опустел'), 0.0)
 

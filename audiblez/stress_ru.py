@@ -22,7 +22,7 @@ ACUTE = '́'
 GRAVE = '̀'
 VOWELS = 'аеёиоуыэюяАЕЁИОУЫЭЮЯ'
 RUACCENT_OPTIONS = dict(omograph_model_size='turbo3.1', use_dictionary=True)
-CACHE_VERSION = '3'  # bump when the output changes (corrections, ё handling...)
+CACHE_VERSION = '4'  # bump when the output changes (corrections, ё handling...)
 
 _WORD_RE = re.compile(rf'[А-ЯЁа-яё+{ACUTE}]+')
 
@@ -91,7 +91,28 @@ BY_PREPOSITION = {
     'ноги': ({'из', 'от', 'у', 'до', 'для', 'без', 'около', 'возле', 'с', 'со'}, 'ног+и', 'н+оги'),
     'губы': ({'из', 'от', 'у', 'до', 'для', 'без', 'около', 'возле', 'с', 'со'}, 'губ+ы', 'г+убы'),
 }
+# «не» is stressed only before a few past-tense forms, which then lose their own stress (не́ был, не́ было, не́ дали,
+# не́ жил), and in «не́ за что», «не́ с кем»... RUAccent stressed it in 58 of the 312 «не» of that story, nearly always
+# wrongly (не́ смогла́ ×4, не́ хочу́, не́ уме́ю, не́ в, не́ со, and не́ бы́ло with two stresses), and the stress model
+# reads such a mark as an emphatic «НЕ». Forms where both stresses are standard (не по́нял / не́ понял) keep the
+# particle unstressed.
+NE_STRESSED_BEFORE = {'был', 'было', 'были', 'дал', 'дало', 'дали', 'жил', 'жило', 'жили'}
+_NE_PREPOSITIONS = {'за', 'о', 'об', 'с', 'со', 'к', 'ко', 'на', 'у', 'от', 'для', 'при', 'про', 'по', 'в', 'во', 'из'}
+_NE_PRONOUNS = {'что', 'чем', 'чего', 'чему', 'чём', 'кого', 'кем', 'кому', 'ком'}
 _TOKEN_RE = re.compile(r'[А-ЯЁа-яё+]+(?:-[А-ЯЁа-яё+]+)*')
+
+
+def _with_case(stressed_form, word):
+    """stressed_form ("+" notation, lowercase) with the letter case of word."""
+    letters = word.replace('+', '')
+    out, j = [], 0
+    for ch in stressed_form:
+        if ch == '+':
+            out.append('+')
+        else:
+            out.append(letters[j] if j < len(letters) else ch)
+            j += 1
+    return ''.join(out)
 
 
 def apply_corrections(src, stressed):
@@ -100,34 +121,32 @@ def apply_corrections(src, stressed):
     mark in `src` (from the e-book or the lexicon) are never changed.
     """
     src_words = _TOKEN_RE.findall(src)
-    out_words = list(_TOKEN_RE.finditer(stressed))
-    if len(src_words) != len(out_words):
+    matches = list(_TOKEN_RE.finditer(stressed))
+    if len(src_words) != len(matches):
         return stressed
-    pieces, pos, prev = [], 0, ''
-    for orig, m in zip(src_words, out_words):
-        w = m.group(0)
-        bare = w.replace('+', '').lower()
-        new = None
-        if '+' not in orig:
-            if bare in NORMATIVE:
-                new = NORMATIVE[bare]
-            elif bare in BY_PREPOSITION:
-                preps, after_prep, otherwise = BY_PREPOSITION[bare]
-                new = after_prep if prev in preps else otherwise
-        if new is not None:
-            letters = w.replace('+', '')
-            out, j = [], 0
-            for ch in new:  # keep the letter case of the word
-                if ch == '+':
-                    out.append('+')
-                else:
-                    out.append(letters[j] if j < len(letters) else ch)
-                    j += 1
-            w = ''.join(out)
-        pieces.append(stressed[pos:m.start()])
-        pieces.append(w)
+    words = [m.group(0) for m in matches]
+    bares = [w.replace('+', '').lower() for w in words]
+    for k, orig in enumerate(src_words):
+        if '+' in orig:
+            continue
+        bare, prev = bares[k], bares[k - 1] if k else ''
+        if bare in NORMATIVE:
+            words[k] = _with_case(NORMATIVE[bare], words[k])
+        elif bare in BY_PREPOSITION:
+            preps, after_prep, otherwise = BY_PREPOSITION[bare]
+            words[k] = _with_case(after_prep if prev in preps else otherwise, words[k])
+        elif bare == 'не' and '+' in words[k]:
+            nxt = bares[k + 1] if k + 1 < len(words) else ''
+            after = bares[k + 2] if k + 2 < len(words) else ''
+            if nxt in NE_STRESSED_BEFORE:
+                if '+' not in src_words[k + 1]:
+                    words[k + 1] = words[k + 1].replace('+', '')  # не́ было, not не́ бы́ло
+            elif not (nxt in _NE_PREPOSITIONS and after in _NE_PRONOUNS):
+                words[k] = words[k].replace('+', '')
+    pieces, pos = [], 0
+    for m, w in zip(matches, words):
+        pieces += [stressed[pos:m.start()], w]
         pos = m.end()
-        prev = bare
     pieces.append(stressed[pos:])
     return ''.join(pieces)
 
