@@ -111,6 +111,21 @@ class AsrUnitsTest(unittest.TestCase):
         self.assertFalse(result.ok)
 
 
+class WhisperCreditsTest(unittest.TestCase):
+    def test_subtitle_credits_are_not_speech(self):
+        from audiblez.audio import strip_whisper_hallucinations
+        text = 'Ты уехал ровно год назад, а в саду опять пахнет антоновкой.'
+        for heard in ('Ты уехал ровно год назад, а в саду опять пахнет антоновкой. субтитров Н.Новикова',
+                      'Ты уехал ровно год назад, а в саду опять пахнет антоновкой. Редактор субтитров А.Синецкая '
+                      'Корректор А.Егорова',
+                      'Ты уехал ровно год назад, а в саду опять пахнет антоновкой. Субтитры сделал DimaTorzok'):
+            self.assertEqual(strip_whisper_hallucinations(heard, text).rstrip('. '), text.rstrip('.'))
+        said = 'Она включила фильм с субтитрами и долго смотрела в экран.'  # the word is in the text: kept
+        self.assertEqual(strip_whisper_hallucinations(said, said), said)
+        early = 'Субтитры сделал DimaTorzok. Ты уехал ровно год назад, а в саду опять пахнет антоновкой.'
+        self.assertIn('антоновкой', strip_whisper_hallucinations(early, text))  # not at the end: never cut
+
+
 class TokenFloorTest(unittest.TestCase):
     def test_short_sentences_get_a_token_floor(self):
         """qwen-tts hard-codes min_new_tokens=2: the engine raises it so a short sentence is not cut after a syllable."""

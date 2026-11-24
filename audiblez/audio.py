@@ -356,7 +356,16 @@ _WHISPER_HALLUCINATIONS = [
 ]
 
 
+# Subtitle credits Whisper adds after the speech, from its subtitled training videos: "Редактор субтитров А.Синецкая
+# Корректор А.Егорова", "Субтитры сделал DimaTorzok", "…антоновки. субтитров Н.Новикова" (the last one made a good
+# take fail the ending check). A credit runs to the end of the transcript.
+_CREDITS = re.compile(r'(?:редактор |корректор )?субтитр\w*|amara\.org|dimatorzok', re.IGNORECASE)
+
+
 def strip_whisper_hallucinations(transcript, reference):
+    credit = _CREDITS.search(transcript)
+    if credit and not _CREDITS.search(reference) and credit.start() >= 0.5 * len(reference):  # after the speech
+        transcript = transcript[:credit.start()]
     for phrase in _WHISPER_HALLUCINATIONS:
         if phrase in transcript and phrase not in reference:
             transcript = transcript.replace(phrase, ' ')
@@ -385,13 +394,22 @@ class AsrVerifier:
         self.model = WhisperModel(model_size, device=kind, device_index=int(index or 0), compute_type=compute_type)
         self.language = (language or 'en')[:2]
 
-    def transcribe(self, wav, sr):
+    def _segments(self, wav, sr, **kwargs):
         if sr != 16000:
             import librosa
             wav = librosa.resample(np.asarray(wav, dtype=np.float32), orig_sr=sr, target_sr=16000)
         segments, _ = self.model.transcribe(np.asarray(wav, dtype=np.float32), language=self.language, beam_size=5,
-                                            condition_on_previous_text=False, vad_filter=False)
-        return ' '.join(s.text.strip() for s in segments).strip()
+                                            condition_on_previous_text=False, vad_filter=False, **kwargs)
+        return list(segments)
+
+    def transcribe(self, wav, sr):
+        return ' '.join(s.text.strip() for s in self._segments(wav, sr)).strip()
+
+    def transcribe_words(self, wav, sr):
+        """The transcript and its words with their times: [(word, start, end)], in seconds from the start of wav."""
+        segments = self._segments(wav, sr, word_timestamps=True)
+        words = [(w.word, float(w.start), float(w.end)) for s in segments for w in (s.words or [])]
+        return ' '.join(s.text.strip() for s in segments).strip(), words
 
     def _heard(self, transcript, text):
         """
