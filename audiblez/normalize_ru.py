@@ -344,14 +344,14 @@ _YO_WORDS = (
     'шёл пришёл ушёл нашёл пошёл вошёл зашёл подошёл прошёл перешёл отошёл обошёл сошёл дошёл взошёл '
     'произошёл нашёлся вёл привёл увёл завёл отвёл подвёл провёл перевёл развёл навёл произвёл изобрёл '
     'приобрёл обрёл нёс принёс унёс занёс отнёс поднёс пронёс перенёс вёз привёз увёз отвёз завёз повёз грёб '
-    'плёл мёл цвёл расцвёл отцвёл лёг слёг прилёг залёг полёг жёг сжёг поджёг зажёг обжёг стёр растёр простёр '
+    'плёл цвёл расцвёл отцвёл лёг слёг прилёг залёг полёг жёг сжёг поджёг зажёг обжёг стёр растёр простёр '
     'стёрся упёрся замёрз мёрз щёлкнул щёлкнула щёлкнули щёлкнуть щёлкать щёлкает '
     'идёт идёшь идём идёте пойдёт пойдёшь пойдём пойдёте придёт придёшь придём придёте найдёт найдёшь найдём '
     'найдёте уйдёт уйдёшь уйдём уйдёте войдёт войдёшь войдём войдёте подойдёт подойдёшь подойдём подойдёте '
     'пройдёт пройдёшь пройдём пройдёте дойдёт дойдёшь дойдём дойдёте зайдёт зайдёшь зайдём зайдёте перейдёт '
     'перейдёшь перейдём обойдёт обойдёшь обойдём сойдёт сойдёшь сойдём отойдёт отойдёшь отойдём произойдёт '
     'найдётся придётся пройдётся обойдётся живёт живёшь живём живёте даёт даёшь даём даёте встаёт встаёшь '
-    'встаём встаёте поёт поёшь поём поёте пьёт пьёшь пьём пьёте льёт льёшь льём бьёт бьёшь бьём бьёте шьёт '
+    'встаём встаёте поёт поёшь поёте пьёт пьёшь пьём пьёте льёт льёшь льём бьёт бьёшь бьём бьёте шьёт '
     'вьёт жуёт плюёт клюёт куёт берёт берёшь берём берёте зовёт зовёшь зовём зовёте ждёт ждёшь ждём ждёте '
     'врёт врёшь врём ревёт ревёшь плывёт плывёшь плывём несёт несёшь несём несёте везёт везёшь везём ведёт '
     'ведёшь ведём ведёте растёт растёшь растём трясёт метёт плетёт цветёт гребёт кладёт кладёшь кладём '
@@ -702,7 +702,7 @@ _LETTER_NAMES = {'Б': 'бэ', 'В': 'вэ', 'Г': 'гэ', 'Д': 'дэ', 'Ж': '
                  'Ш': 'ша', 'Щ': 'ща'}
 
 
-def spell_consonant_abbreviations(text):
+def spell_consonant_abbreviations(text, stress=False):
     """
     'СРЗ' -> 'эс-эр-зэ', 'МВД' -> 'эм-вэ-дэ': an abbreviation without vowels can only be read by its letter names,
     which a TTS model may otherwise turn into an unpronounceable syllable. Abbreviations with vowels (США, БТИ, ВУЗ)
@@ -712,7 +712,10 @@ def spell_consonant_abbreviations(text):
         w = m.group(0)
         if re.fullmatch(_ROMAN_TOKEN, w):  # ХХ, ХIX (Roman numerals typed with Cyrillic letters)
             return w
-        return '-'.join(_LETTER_NAMES[c] for c in w)
+        names = [_LETTER_NAMES[c] for c in w]
+        if stress:  # letter abbreviations are stressed on their last letter: "эс-эр-зэ́"
+            names[-1] = re.sub(r'([аэе])', '\\1\u0301', names[-1], count=1)
+        return '-'.join(names)
     return re.sub(r'(?<![\w-])[БВГДЖЗКЛМНПРСТФХЦЧШЩ]{2,5}(?![\w-])', repl, text)
 
 
@@ -782,7 +785,7 @@ def normalize_ru(text, is_heading=False, keep_stress=False):
     text = normalize_units(text)
     text = expand_abbreviations(text)
     text = normalize_numbers(text)
-    text = spell_consonant_abbreviations(text)
+    text = spell_consonant_abbreviations(text, stress=keep_stress)
     text = restore_yo(text)
     text = normalize_punctuation(text)
     return ensure_terminal_punctuation(text)

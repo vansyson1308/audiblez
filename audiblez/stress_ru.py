@@ -22,7 +22,7 @@ ACUTE = '́'
 GRAVE = '̀'
 VOWELS = 'аеёиоуыэюяАЕЁИОУЫЭЮЯ'
 RUACCENT_OPTIONS = dict(omograph_model_size='turbo3.1', use_dictionary=True)
-CACHE_VERSION = '1'
+CACHE_VERSION = '3'  # bump when the output changes (corrections, ё handling...)
 
 _WORD_RE = re.compile(rf'[А-ЯЁа-яё+{ACUTE}]+')
 
@@ -76,6 +76,62 @@ def restore_case(original, processed):
     return ''.join(out) if i == len(original) else None
 
 
+# Corrections applied after RUAccent, found by reviewing every homograph of a 1.6-hour story: RUAccent chose the
+# colloquial stress of some past-tense forms (по́няла, по́дняла ×10) and the wrong case of very common nouns
+# (у двери́, вытирая руки́). Values are the stressed form ("+" before the vowel).
+NORMATIVE = {  # past-tense forms with a single standard stress
+    'поняла': 'понял+а', 'подняла': 'поднял+а', 'приняла': 'принял+а', 'принялась': 'принял+ась',
+    'начался': 'началс+я', 'началась': 'начал+ась', 'отняла': 'отнял+а', 'заняла': 'занял+а', 'наняла': 'нанял+а',
+    'по-моему': 'по-м+оему', 'по-твоему': 'по-тв+оему',
+}
+# homographs decided by the preposition before them: {word: (stress after these prepositions, stress otherwise)}
+BY_PREPOSITION = {
+    'двери': ({'в', 'во', 'на'}, 'двер+и', 'дв+ери'),  # в двери́ (locative) / у две́ри, две́ри (plural)
+    'руки': ({'из', 'от', 'у', 'до', 'для', 'без', 'около', 'возле', 'с', 'со'}, 'рук+и', 'р+уки'),
+    'ноги': ({'из', 'от', 'у', 'до', 'для', 'без', 'около', 'возле', 'с', 'со'}, 'ног+и', 'н+оги'),
+    'губы': ({'из', 'от', 'у', 'до', 'для', 'без', 'около', 'возле', 'с', 'со'}, 'губ+ы', 'г+убы'),
+}
+_TOKEN_RE = re.compile(r'[А-ЯЁа-яё+]+(?:-[А-ЯЁа-яё+]+)*')
+
+
+def apply_corrections(src, stressed):
+    """
+    Fix known RUAccent choices in `stressed` (its output for `src`, both in "+" notation). Words that already had a
+    mark in `src` (from the e-book or the lexicon) are never changed.
+    """
+    src_words = _TOKEN_RE.findall(src)
+    out_words = list(_TOKEN_RE.finditer(stressed))
+    if len(src_words) != len(out_words):
+        return stressed
+    pieces, pos, prev = [], 0, ''
+    for orig, m in zip(src_words, out_words):
+        w = m.group(0)
+        bare = w.replace('+', '').lower()
+        new = None
+        if '+' not in orig:
+            if bare in NORMATIVE:
+                new = NORMATIVE[bare]
+            elif bare in BY_PREPOSITION:
+                preps, after_prep, otherwise = BY_PREPOSITION[bare]
+                new = after_prep if prev in preps else otherwise
+        if new is not None:
+            letters = w.replace('+', '')
+            out, j = [], 0
+            for ch in new:  # keep the letter case of the word
+                if ch == '+':
+                    out.append('+')
+                else:
+                    out.append(letters[j] if j < len(letters) else ch)
+                    j += 1
+            w = ''.join(out)
+        pieces.append(stressed[pos:m.start()])
+        pieces.append(w)
+        pos = m.end()
+        prev = bare
+    pieces.append(stressed[pos:])
+    return ''.join(pieces)
+
+
 class Stressor:
     """Adds stress marks to normalized Russian text, with a persistent cache (RUAccent takes ~0.1 s per sentence)."""
 
@@ -100,6 +156,11 @@ class Stressor:
             print('Loading RUAccent (stress marks and ё)...')
             acc = RUAccent()
             acc.load(**RUACCENT_OPTIONS)
+            # RUAccent's guess of ё on homographs (лет/лёт, села/сёла, небо/нёбо, самое/самоё, поем/поём) was wrong
+            # 16 times out of 16 in a 1.6-hour story whose author already writes ё: keep only its dictionary of
+            # unambiguous ё words (клеёный, стёганый, узнаёт...) and our own restore_yo.
+            if hasattr(acc, 'yo_homographs'):
+                acc.yo_homographs = {}
             self._accentizer = acc
         return self._accentizer
 
@@ -118,7 +179,7 @@ class Stressor:
         result = restore_case(src, processed)
         if result is None:  # should not happen; stress the text as written rather than lose the case
             result = self.accentizer.process_all(src)
-        out = plus_to_acute(result)
+        out = plus_to_acute(apply_corrections(src, result))
         self.cache[key] = out
         self._dirty = True
         return out

@@ -86,6 +86,9 @@ class NormalizeRussianTest(unittest.TestCase):
         # "все" (everyone) / "всё" (everything), "небо", "лева" etc. must not be touched without context
         self.assertEqual(normalize_ru('Все пришли. Левой рукой. Мы моем посуду.'),
                          'Все пришли. Левой рукой. Мы моем посуду.')
+        # мел (chalk) / мёл (swept), поем (I will eat) / поём (we sing)
+        self.assertEqual(normalize_ru('Лицо белое, как мел. Давай я сейчас поем.'),
+                         'Лицо белое, как мел. Давай я сейчас поем.')
 
 
 class LexiconTest(unittest.TestCase):

@@ -63,6 +63,19 @@ class StressHelpersTest(unittest.TestCase):
             st2('Какая сегодня погода? Все ее мысли были о детях.')
             self.assertEqual(st2.accentizer.calls, [])  # from the cache
 
+    def test_corrections_after_ruaccent(self):
+        from audiblez.stress_ru import BY_PREPOSITION, NORMATIVE, apply_corrections
+        for word, value in list(NORMATIVE.items()) + [(w, v) for w, (_, a, b) in BY_PREPOSITION.items() for v in (a, b)]:
+            self.assertEqual(value.replace('+', ''), word)
+            self.assertEqual(value.count('+'), 1)
+            self.assertIn(value[value.index('+') + 1], 'аеёиоуыэюя')
+        src = 'вдруг поняла, у самой двери, вытирая руки, ледоход начался, из руки, стоял в двери, ПОНЯЛА, Г+убы'
+        out = 'вдруг п+оняла, у с+амой двер+и, вытир+ая рук+и, ледох+од н+ачался, из р+уки, сто+ял в дв+ери, П+ОНЯЛА, Г+убы'
+        self.assertEqual(plus_to_acute(apply_corrections(src, out)),
+                         'вдруг поняла́, у са́мой две́ри, вытира́я ру́ки, ледохо́д начался́, из руки́, стоя́л в двери́, '
+                         'ПОНЯЛА́, Гу́бы')  # a mark that was already in the text (lexicon) is kept
+        self.assertEqual(apply_corrections('один два', 'од+ин'), 'од+ин')  # words do not line up: unchanged
+
     def test_cer_ignores_stress_marks(self):
         self.assertEqual(char_error_rate('Ве́чером за́мок опусте́л.', 'Вечером замок опустел'), 0.0)
 
@@ -81,6 +94,16 @@ class ShoutingTest(unittest.TestCase):
         self.assertEqual(normalize_ru('Сотрудники МВД и ФСБ приехали.'), 'Сотрудники эм-вэ-дэ и эф-эс-бэ приехали.')
         self.assertEqual(normalize_ru('После ЗАГС ОНИ ПОШЛИ ДОМОЙ.'), 'После ЗАГС они пошли домой.')
         self.assertEqual(normalize_ru('В СССР и США.'), 'В эс-эс-эс-эр и США.')
+
+    def test_letter_abbreviations_and_lexicon_case(self):
+        self.assertEqual(normalize_ru('Тридцать пятый СРЗ.', keep_stress=True), 'Тридцать пятый эс-эр-зэ́.')
+        from audiblez.normalize import Lexicon
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / 'lex.txt'
+            path.write_text('БТИ = бэ-тэ-и\nГерманн = Герман\n', encoding='utf-8')
+            lex = Lexicon.load(path)
+            self.assertEqual(lex.apply('Старый план БТИ. БТИ закрыли. Германн пришёл.'),
+                             'Старый план бэ-тэ-и. Бэ-тэ-и закрыли. Герман пришёл.')
 
     def test_plus_sign(self):
         self.assertEqual(normalize_ru('Было 2+2.'), 'Было два плюс два.')

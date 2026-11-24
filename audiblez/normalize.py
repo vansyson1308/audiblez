@@ -50,17 +50,27 @@ class Lexicon:
             if is_regex:
                 text = pattern.sub(dst, text)
             else:
-                text = pattern.sub(lambda m, d=dst: _keep_capital(m.group(0), d), text)
+                text = pattern.sub(lambda m, d=dst: _keep_capital(m.group(0), d, _sentence_start(m.string, m.start())),
+                                   text)
         return text
 
     def __len__(self):
         return len(self.rules)
 
 
-def _keep_capital(src, dst):
+def _keep_capital(src, dst, at_sentence_start=True):
+    """Capitalize the replacement like the word it replaces ("Германн = Герман"); a replaced abbreviation
+    ("БТИ = бэ-тэ-и") is only capitalized at the start of a sentence."""
+    if len(src) > 1 and src.isupper() and not at_sentence_start:
+        return dst
     if src[:1].isupper() and dst[:1].islower():
         return dst[:1].upper() + dst[1:]
     return dst
+
+
+def _sentence_start(text, pos):
+    before = text[:pos].rstrip(' \t«"„“(—–-')
+    return before == '' or before[-1] in '.!?…\n'
 
 
 _CJK = ('zh', 'ja')  # languages written without spaces; Korean uses spaces and Western punctuation
