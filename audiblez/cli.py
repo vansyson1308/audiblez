@@ -10,6 +10,9 @@ EPILOG = '''examples:
                                                                  Russian, Qwen3-TTS cloned narrator, YouTube videos
                                                                  of about 2 hours each
   audiblez book_ru.epub --dry-run                                check the normalized text (script.txt) first
+  audiblez story_ja.md --youtube --episode-hours 2               your own Japanese story (Markdown, # = chapter)
+  audiblez chapters_ko/ --voice-profile ko_male_narrator         a folder of .txt files, one per chapter
+  audiblez story_ja.md --benchmark                               measure the fastest settings on this GPU
   audiblez book_ru.epub --chapters 1 --voice-profile voices/narrator/candidate_02
                                                                  quick test on the first chapter
   audiblez-voice design --preset ru_male_narrator                create candidate voices to choose from
@@ -24,13 +27,16 @@ available Kokoro voices:
 def build_parser():
     parser = argparse.ArgumentParser(prog='audiblez', epilog=EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter,
                                      description='Generate audiobooks from e-books (epub to m4b / YouTube mp4).')
-    parser.add_argument('epub_file_path', help='Path to the epub file')
+    parser.add_argument('epub_file_path', metavar='BOOK',
+                        help='An .epub, a .txt / .md file, or a folder of .txt / .md files (one per chapter)')
     parser.add_argument('-o', '--output', default='.', help='Output folder for the audiobook and temporary files',
                         metavar='FOLDER')
     parser.add_argument('-p', '--pick', default=False, action='store_true',
                         help='Interactively select which chapters to read in the audiobook')
     parser.add_argument('--chapters', metavar='LIST', help='Only these audiobook chapters, e.g. "1-3,5" (see the table)')
     parser.add_argument('--dry-run', action='store_true', help='Only extract and normalize the text (script.txt)')
+    parser.add_argument('--benchmark', action='store_true',
+                        help='Measure the speed of every backend / batch size on this machine and recommend one')
 
     g = parser.add_argument_group('voice and engine')
     g.add_argument('--engine', choices=['auto', 'kokoro', 'qwen'], default='auto',
@@ -60,6 +66,11 @@ def build_parser():
     g.add_argument('--top-k', type=int)
     g.add_argument('--repetition-penalty', type=float)
     g.add_argument('--seed', type=int, default=0, help='Base random seed (results are reproducible)')
+    g.add_argument('--backend', choices=['auto', 'qwen-tts', 'faster'], default='auto',
+                   help='Qwen3-TTS backend: faster = CUDA graphs (pip install faster-qwen3-tts); auto uses it when '
+                        'installed on a CUDA GPU and falls back to qwen-tts on any error')
+    g.add_argument('--gpus', default='auto',
+                   help='Parallel workers: auto (one per GPU when there are 2+, e.g. Kaggle 2xT4), off, or "0,1"')
 
     g = parser.add_argument_group('text')
     g.add_argument('--lexicon', metavar='FILE', help='Pronunciation dictionary: lines "word = replacement"')
@@ -103,6 +114,7 @@ def settings_from_args(args):
         ref_audio=args.ref_audio, ref_text=args.ref_text, speaker=args.speaker, instruct=args.instruct,
         x_vector_only=args.x_vector_only, temperature=args.temperature, top_p=args.top_p, top_k=args.top_k,
         repetition_penalty=args.repetition_penalty, seed=args.seed, batch_size=args.batch_size,
+        backend=args.backend, gpus=args.gpus,
         max_chunk_chars=args.max_chunk_chars, qa=not args.no_qa, asr=args.asr, asr_model=args.asr_model,
         max_retries=args.max_retries, retry_failed=args.retry_failed, normalize=not args.no_normalize,
         lexicon=args.lexicon, keep_stress=args.keep_stress_marks, announce_title=not args.no_title,
@@ -131,6 +143,10 @@ def cli_main(argv=None):
             print('CUDA GPU not available. Defaulting to CPU')
             settings.device = 'cpu'
 
+    if args.benchmark:
+        from audiblez.bench import run_benchmark
+        run_benchmark(args.epub_file_path, settings, args.output)
+        return
     from audiblez.core import main
     main(args.epub_file_path, args.voice, args.pick, args.speed, args.output, settings=settings)
 

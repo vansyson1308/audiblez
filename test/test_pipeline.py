@@ -138,6 +138,57 @@ class PipelineTest(unittest.TestCase):
             docs.append(d)
         self.assertEqual([d.get_name() for d in core.find_good_chapters(docs)], ['index.html'])
 
+    @unittest.skipUnless(shutil.which('ffmpeg'), 'ffmpeg not installed')
+    def test_parallel_workers(self):
+        """Two worker processes (on CPU here, one per GPU on Kaggle) share the work and the cache."""
+        from audiblez.parallel import resolve_devices
+        self.assertEqual(resolve_devices('0,1', 'qwen'), ['cuda:0', 'cuda:1'])
+        self.assertIsNone(resolve_devices('off', 'qwen'))
+        self.assertIsNone(resolve_devices('0,1', 'kokoro'))
+        out = self.tmp / 'out_parallel'
+        settings = core.Settings(formats=('m4b',), asr='off', gpus='cpu,cpu', batch_size=2,
+                                 engine_factory='fake_engine:create_engine')
+        res = core.main(self.epub, output_folder=out, settings=settings)
+        self.assertTrue(any(p.name.endswith('.m4b') for p in res['files']))
+        self.assertEqual(res['qa_failures'], [])  # the hallucinated chunk was retried inside a worker
+        # every chunk is in the shared cache: a second run synthesizes nothing (no worker started)
+        res2 = core.main(self.epub, output_folder=out, settings=settings)
+        self.assertEqual(len(res2['chapters']), 3)
+
+    def test_engine_fingerprint_matches_engine(self):
+        """The cache key computed without loading a model equals the one of the real engine."""
+        from audiblez.engines import QwenEngine, find_voice_profile
+
+        class DummyModel:
+            device = 'cpu'
+
+            def create_voice_clone_prompt(self, **kwargs):
+                return []
+
+        settings = core.Settings(voice_profile='ru_male_narrator', temperature=0.7)
+        choice = core.resolve_engine_choice(settings, 'ru')
+        engine = QwenEngine(mode='clone', language='ru', voice_profile=find_voice_profile('ru_male_narrator'),
+                            model=DummyModel(), temperature=0.7)
+        self.assertEqual(core.engine_fingerprint(choice, settings), (engine.name, engine.fingerprint()))
+        settings = core.Settings(speaker='Ono_Anna', instruct='優しく', language='ja')
+        choice = core.resolve_engine_choice(settings, 'ja')
+        engine = QwenEngine(mode='custom', language='ja', speaker='Ono_Anna', instruct='優しく', model=DummyModel())
+        self.assertEqual(core.engine_fingerprint(choice, settings), (engine.name, engine.fingerprint()))
+
+    def test_benchmark(self):
+        """--benchmark times the configurations of this device and runs the quality checks on every take."""
+        from audiblez.bench import acceptable, run_benchmark
+        settings = core.Settings(asr='off', device='cpu', engine_factory='fake_engine:create_engine')
+        logs = []
+        res = run_benchmark(self.epub, settings, output_folder=self.tmp / 'out', n_chunks=4, log=logs.append)
+        self.assertEqual((res['dtype'], res['backend'], res['batch_size']), ('float32', 'qwen-tts', 1))
+        self.assertEqual(res['failures'], 0)
+        self.assertTrue(any(line.startswith('\nFastest: --backend qwen-tts --batch-size 1 --dtype float32')
+                            for line in logs), logs)
+        # a precision whose takes fail the checks is never recommended, even when it is faster
+        results = [dict(speed=1.0, failures=0), dict(speed=2.0, failures=1), dict(speed=3.0, failures=4)]
+        self.assertEqual(max(acceptable(results), key=lambda r: r['speed'])['speed'], 2.0)
+
     def test_chapter_selection(self):
         res = core.main(self.epub, output_folder=self.tmp / 'out',
                         settings=core.Settings(dry_run=True, chapters='2-3'))
