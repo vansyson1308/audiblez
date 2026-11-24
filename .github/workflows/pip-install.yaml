@@ -54,7 +54,14 @@ jobs:
         uses: actions/setup-python@v3
         with:
           python-version: "3.11"
+      - name: Check if winget is already available
+        id: winget
+        shell: pwsh
+        run: |
+          if (Get-Command winget -ErrorAction SilentlyContinue) { "found=true" >> $env:GITHUB_OUTPUT } else { "found=false" >> $env:GITHUB_OUTPUT }
       - name: Install winget
+        # Recent windows runner images ship winget (and newer dependencies, which makes this action fail)
+        if: steps.winget.outputs.found != 'true'
         uses: Cyberboss/install-winget@v1
       - name: Install wingetcreate
         run: winget install wingetcreate --disable-interactivity --accept-source-agreements
