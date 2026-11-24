@@ -356,7 +356,16 @@ _WHISPER_HALLUCINATIONS = [
 ]
 
 
+# Subtitle credits Whisper adds after the speech, from its subtitled training videos: "Редактор субтитров А.Синецкая
+# Корректор А.Егорова", "Субтитры сделал DimaTorzok", "…антоновки. субтитров Н.Новикова" (the last one made a good
+# take fail the ending check). A credit runs to the end of the transcript.
+_CREDITS = re.compile(r'(?:редактор |корректор )?субтитр\w*|amara\.org|dimatorzok', re.IGNORECASE)
+
+
 def strip_whisper_hallucinations(transcript, reference):
+    credit = _CREDITS.search(transcript)
+    if credit and not _CREDITS.search(reference) and credit.start() >= 0.5 * len(reference):  # after the speech
+        transcript = transcript[:credit.start()]
     for phrase in _WHISPER_HALLUCINATIONS:
         if phrase in transcript and phrase not in reference:
             transcript = transcript.replace(phrase, ' ')
