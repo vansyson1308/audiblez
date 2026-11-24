@@ -1,0 +1,11 @@
+{
+  "source": "qwen3-tts voice design",
+  "instruct": "A warm, gentle female voice, about 35 years old, native Russian speaker. Professional audiobook narrator: soft, emotionally expressive storytelling intonation, clear diction, moderate pace, no foreign accent.",
+  "seed": 2,
+  "audio": "reference.flac",
+  "text": "Тишина стояла такая, что было слышно, как тикают часы в соседней комнате. — Ты правда думаешь, что он вернётся? — спросила она едва слышно. Я ничего не ответил: за окном уже светало.",
+  "language": "ru",
+  "duration": 13.04,
+  "name": "ru_female_narrator",
+  "license": "Generated with Qwen3-TTS-12Hz-1.7B-VoiceDesign (Apache-2.0); synthetic voice, not a real person"
+}

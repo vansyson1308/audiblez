@@ -17,14 +17,14 @@ class CliTest(unittest.TestCase):
     def test_epub(self):
         out = self.cli('epub/mini.epub')
         self.assertIn('Found cover image', out)
-        self.assertIn('Creating M4B file', out)
+        self.assertIn('Encoding mini.m4b', out)
         self.assertTrue(Path('../mini.m4b').exists())
         self.assertTrue(Path('../mini.m4b').stat().st_size > 256 * 1024)
 
     def test_epub_voice_and_output_folder(self):
         out = self.cli('epub/mini.epub -v af_sky -o test/prova')
         self.assertIn('Found cover image', out)
-        self.assertIn('Creating M4B file', out)
+        self.assertIn('Encoding mini.m4b', out)
         self.assertTrue(Path('./prova/mini.m4b').exists())
         self.assertTrue(Path('./prova/mini.m4b').stat().st_size > 256 * 1024)
 

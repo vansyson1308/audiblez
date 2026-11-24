@@ -3,9 +3,9 @@
 # A simple wxWidgets UI for audiblez
 
 import torch.cuda
-import numpy as np
 import soundfile
 import threading
+import traceback
 import platform
 import subprocess
 import io
@@ -284,17 +284,21 @@ class MainWindow(wx.Frame):
         engine_radio_panel.SetSizer(engine_radio_panel_sizer)
         engine_radio_panel_sizer.Add(cpu_radio, 0, wx.ALL, 5)
         engine_radio_panel_sizer.Add(cuda_radio, 0, wx.ALL, 5)
-        cpu_radio.Bind(wx.EVT_RADIOBUTTON, lambda event: torch.set_default_device('cpu'))
-        cuda_radio.Bind(wx.EVT_RADIOBUTTON, lambda event: torch.set_default_device('cuda'))
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        cpu_radio.Bind(wx.EVT_RADIOBUTTON, lambda event: setattr(self, 'device', 'cpu'))
+        cuda_radio.Bind(wx.EVT_RADIOBUTTON, lambda event: setattr(self, 'device', 'cuda'))
 
-        # Create a list of voices with flags
-        flag_and_voice_list = []
+        # Create a list of voices with flags: Qwen3-TTS voice profiles first (Russian...), then Kokoro voices
+        from audiblez.engines import list_bundled_voices
+        flag_and_voice_list = [f'🎙 {name} (Qwen3-TTS)' for name in list_bundled_voices()]
         for code, l in voices.items():
             for v in l:
                 flag_and_voice_list.append(f'{flags[code]} {v}')
 
         voice_label = wx.StaticText(panel, label="Voice:")
-        default_voice = flag_and_voice_list[0]
+        book_lang = getattr(self, 'selected_book_language', None) or ''
+        default_voice = next((v for v in flag_and_voice_list if v.split(' ')[1].startswith(book_lang + '_')),
+                             next(v for v in flag_and_voice_list if 'Qwen3-TTS' not in v))
         self.selected_voice = default_voice
         voice_dropdown = wx.ComboBox(panel, choices=flag_and_voice_list, value=default_voice)
         voice_dropdown.Bind(wx.EVT_COMBOBOX, self.on_select_voice)
@@ -369,9 +373,13 @@ class MainWindow(wx.Frame):
         self.selected_voice = event.GetString()
 
     def on_select_speed(self, event):
-        speed = float(event.GetString())
-        print('Selected speed', speed)
-        self.selected_speed = speed
+        try:
+            speed = float(event.GetString())
+        except ValueError:
+            return
+        if 0.5 <= speed <= 2.0:
+            print('Selected speed', speed)
+            self.selected_speed = speed
 
     def open_epub(self, file_path):
         # Cleanup previous layout
@@ -388,11 +396,16 @@ class MainWindow(wx.Frame):
         self.selected_book_title = meta_title[0][0] if meta_title else ''
         meta_creator = book.get_metadata('DC', 'creator')
         self.selected_book_author = meta_creator[0][0] if meta_creator else ''
+        meta_lang = book.get_metadata('DC', 'language')
+        self.selected_book_language = meta_lang[0][0][:2].lower() if meta_lang and meta_lang[0][0] else None
         self.selected_book = book
 
         self.document_chapters = find_document_chapters_and_extract_texts(book)
         good_chapters = find_good_chapters(self.document_chapters)
-        self.selected_chapter = good_chapters[0]
+        if not self.document_chapters:
+            wx.MessageBox("No readable text found in this EPUB.", "Audiblez")
+            return
+        self.selected_chapter = good_chapters[0] if good_chapters else self.document_chapters[0]
         for chapter in self.document_chapters:
             chapter.short_name = chapter.get_name().replace('.xhtml', '').replace('xhtml/', '').replace('.html', '').replace('Text/', '')
             chapter.is_selected = chapter in good_chapters
@@ -403,7 +416,7 @@ class MainWindow(wx.Frame):
         cover = find_cover(book)
         if cover is not None:
             pil_image = Image.open(io.BytesIO(cover.content))
-            wx_img = wx.EmptyImage(pil_image.size[0], pil_image.size[1])
+            wx_img = wx.Image(pil_image.size[0], pil_image.size[1])
             wx_img.SetData(pil_image.convert("RGB").tobytes())
             cover_h = 200
             cover_w = int(cover_h * pil_image.size[0] / pil_image.size[1])
@@ -465,7 +478,7 @@ class MainWindow(wx.Frame):
             table.Append(['', chapter.short_name, f"{len(chapter.extracted_text):,}"])
             if auto_selected: table.CheckItem(i)
 
-        title_text = wx.StaticText(panel, label=f"Select chapters to include in the audiobook:")
+        title_text = wx.StaticText(panel, label="Select chapters to include in the audiobook:")
         sizer.Add(title_text, 0, wx.ALL, 5)
         sizer.Add(table, 1, wx.ALL | wx.EXPAND, 5)
         return panel
@@ -473,34 +486,50 @@ class MainWindow(wx.Frame):
     def get_selected_voice(self):
         return self.selected_voice.split(' ')[1]
 
+    def is_qwen_voice(self):
+        return 'Qwen3-TTS' in self.selected_voice
+
+    def make_settings(self):
+        from audiblez.core import Settings
+        voice = self.get_selected_voice()
+        if self.is_qwen_voice():
+            return Settings(engine='qwen', voice_profile=voice, speed=self.get_selected_speed(), device=self.device)
+        return Settings(engine='kokoro', voice=voice, speed=self.get_selected_speed(), device=self.device)
+
+    def voice_language(self):
+        if self.is_qwen_voice():
+            return self.get_selected_voice().split('_')[0]
+        from audiblez.engines import KOKORO_LANGUAGES
+        return KOKORO_LANGUAGES.get(self.get_selected_voice()[0], 'en')
+
     def get_selected_speed(self):
         return float(self.selected_speed)
 
     def on_preview_chapter(self, event):
-        lang_code = self.get_selected_voice()[0]
         button = event.GetEventObject()
         button.SetLabel("⏳")
         button.Disable()
 
-        def generate_preview():
-            import audiblez.core as core
-            from kokoro import KPipeline
-            pipeline = KPipeline(lang_code=lang_code)
-            core.load_spacy()
-            text = self.selected_chapter.extracted_text[:300]
-            if len(text) == 0: return
-            audio_segments = core.gen_audio_segments(
-                pipeline,
-                text,
-                voice=self.get_selected_voice(),
-                speed=self.get_selected_speed())
-            final_audio = np.concatenate(audio_segments)
-            tmp_preview_wav_file = NamedTemporaryFile(suffix='.wav', delete=False)
-            soundfile.write(tmp_preview_wav_file, final_audio, core.sample_rate)
-            cmd = ['ffplay', '-autoexit', '-nodisp', tmp_preview_wav_file.name]
-            subprocess.run(cmd)
+        def restore_button():
             button.SetLabel("🔊 Preview")
             button.Enable()
+
+        def generate_preview():
+            import audiblez.core as core
+            try:
+                text = self.selected_chapter.extracted_text[:300]
+                if len(text.strip()) == 0:
+                    return
+                final_audio, sr = core.preview_audio(text, settings=self.make_settings(),
+                                                     language=self.voice_language())
+                tmp_preview_wav_file = NamedTemporaryFile(suffix='.wav', delete=False)
+                tmp_preview_wav_file.close()
+                soundfile.write(tmp_preview_wav_file.name, final_audio, sr)
+                subprocess.run(['ffplay', '-autoexit', '-nodisp', tmp_preview_wav_file.name])
+            except Exception as e:
+                wx.CallAfter(wx.MessageBox, f"Preview failed: {e}", "Audiblez")
+            finally:
+                wx.CallAfter(restore_button)
 
         if len(self.preview_threads) > 0:
             for thread in self.preview_threads:
@@ -530,7 +559,7 @@ class MainWindow(wx.Frame):
         self.core_thread = CoreThread(params=dict(
             file_path=file_path, voice=voice, pick_manually=False, speed=speed,
             output_folder=self.output_folder_text_ctrl.GetValue(),
-            selected_chapters=selected_chapters))
+            selected_chapters=selected_chapters, settings=self.make_settings()))
         self.core_thread.start()
 
     def on_open(self, event):
@@ -571,8 +600,12 @@ class CoreThread(threading.Thread):
         self.params = params
 
     def run(self):
-        import core
-        core.main(**self.params, post_event=self.post_event)
+        from audiblez import core
+        try:
+            core.main(**self.params, post_event=self.post_event)
+        except BaseException as e:  # SystemExit included: show the reason instead of dying silently
+            traceback.print_exc()
+            wx.CallAfter(wx.MessageBox, f"Audiobook synthesis failed: {e}", "Audiblez")
 
     def post_event(self, event_name, **kwargs):
         # eg. 'EVENT_CORE_PROGRESS' -> EventCoreProgress, EVENT_CORE_PROGRESS
@@ -584,6 +617,8 @@ class CoreThread(threading.Thread):
 
 
 def main():
+    from audiblez import ensure_utf8_stdio
+    ensure_utf8_stdio()
     print('Starting GUI...')
     app = wx.App(False)
     frame = MainWindow(None, "Audiblez - Generate Audiobooks from E-books")
