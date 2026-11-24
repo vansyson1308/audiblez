@@ -112,8 +112,11 @@ khi mỗi câu có một từ đồng hình. Lưu ý:
   không có dấu trọng âm, mà một truyện có rất nhiều câu như vậy. Với 5,6 giây đầu của chính giọng mẫu đó (cắt ở chỗ
   nghỉ sau câu đầu) nó đọc đúng 18/18, cùng độ dài như model gốc, và cả 8/8 đoạn dài/trung bình. audiblez tự dùng
   phần đầu này khi đọc bằng model trọng âm: hai giọng có sẵn đã khai báo sẵn (`"short_reference"` trong
-  `profile.json`). Giọng tự tạo thì thêm vào `profile.json` của nó (thời điểm cắt nằm trong một chỗ nghỉ, sau một
-  câu trọn vẹn, khoảng 5–7 s, và đúng câu đó):
+  `profile.json`). Giọng tạo bằng `audiblez-voice design` hoặc `create` được **tự thêm** dòng này khi có Whisper
+  (`pip install faster-whisper`): nó tìm câu trọn vẹn đầu tiên kết thúc trong khoảng 4–8 s và cắt ở chỗ yên lặng
+  nhất của khoảng nghỉ sau câu đó, trước tiếng hít thở (nếu có). Không tìm được khoảng nghỉ đủ yên (thấp hơn mức
+  giọng đọc ít nhất 35 dB) thì nó in `no short reference: …` và bỏ qua; khi đó thêm tay vào `profile.json` (thời
+  điểm cắt nằm trong một chỗ nghỉ, sau một câu trọn vẹn, khoảng 5–7 s, và đúng câu đó):
   ```json
   "short_reference": {"seconds": 5.58, "text": "Тишина стояла такая, что было слышно, как тикают часы в соседней комнате."}
   ```
