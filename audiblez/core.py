@@ -372,7 +372,8 @@ def resolve_engine_choice(settings: Settings, book_language):
             lang = language or book_language or 'en'
             # Qwen3-TTS (expressive, cloned narrator) when audiblez ships a narrator voice for the language,
             # Kokoro (fast) for its other languages
-            engine = 'qwen' if lang in DEFAULT_QWEN_VOICES or lang not in KOKORO_LANGUAGE_CODES else 'kokoro'
+            engine = 'qwen' if (lang in DEFAULT_QWEN_VOICES or lang not in KOKORO_LANGUAGE_CODES
+                                or not _kokoro_installed()) else 'kokoro'
     if engine == 'kokoro':
         voice = settings.voice
         if not voice:
@@ -427,10 +428,18 @@ def _load_factory(settings: Settings):
     return getattr(importlib.import_module(module), attr or 'create_engine')
 
 
+def _kokoro_installed():
+    import importlib.util
+    return importlib.util.find_spec('kokoro') is not None
+
+
 def create_engine(choice, settings: Settings):
     if settings.engine_factory:
         return _load_factory(settings)(choice, settings)
     if choice['engine'] == 'kokoro':
+        if not _kokoro_installed():
+            raise SystemExit('Kokoro is not installed (pip install kokoro; it needs Python 3.10-3.12). '
+                             'Use --engine qwen with a --voice-profile instead.')
         from audiblez.engines import KokoroEngine
         return KokoroEngine(choice['voice'], speed=settings.speed, device=settings.device)
     from audiblez.engines import QwenEngine
