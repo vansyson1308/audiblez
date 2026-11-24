@@ -325,9 +325,9 @@ def load_reference_audio(path, target_sr=24000):
 
 # Fine-tunes that need a short voice reference. With the 13 s reference of ru_female_narrator the ru-stress model
 # said nothing, or stopped after a syllable, on all 18 takes of 9 sentences of 9-57 letters (with or without stress
-# marks; the non-streaming text layout did not help either), so most chunks of a story would fail. With the first
-# 5.6 s of the same reference it read all 18, with the durations of the base model, and medium and long chunks as
-# well. The base model reads short sentences fine with the whole reference (22/22).
+# marks; with the non-streaming text layout 1/18): 52 of the 487 chunks of the first story are that short.
+# With the first 5.6 s of the same reference it read all 18, with the durations of the base model, and medium and
+# long chunks as well. The base model reads short sentences fine with the whole reference (22/22).
 SHORT_REFERENCE_MODELS = ('siriusfreak/qwen3-tts-12hz-1.7b-ru-stress-cf',)
 
 
