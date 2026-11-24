@@ -7,7 +7,8 @@
 
 ### v6: your own stories in Japanese, Korean, Russian… rendered fast on free GPUs
 
-Audiblez turns `.epub` e-books **and your own stories** (`.txt`, `.md`, or a folder with one file per chapter) into
+Audiblez turns `.epub` and `.fb2` e-books **and your own stories** (`.txt`, `.md`, `.docx`, or a folder with one file
+per chapter) into
 `.m4b` audiobooks and `.mp4` videos for YouTube, with a natural, expressive narrator.
 
 | Engine | Languages | Strengths |
@@ -33,22 +34,32 @@ What happens between the text and the audio file matters as much as the voice:
 - **Korean**: numbers spelled in Hangul with the right system for the counter (`3명` → *세 명*, `2026년 6월` →
   *이천이십육 년 유월*, `오후 3시 30분` → *오후 세 시 삼십 분*, `20살` → *스무 살*), sentence splitting on Korean
   punctuation, spacing kept when lines are joined.
-- **Russian**: numbers in the right case and gender, dates, Roman numerals, abbreviations, restoration of `ё`.
+- **Russian**: numbers in the right case and gender, dates, Roman numerals, abbreviations, restoration of `ё`,
+  ALL-CAPS YouTube-style titles read as words (abbreviations such as МВД kept), dialogue typed with hyphens.
+  `--stress ruaccent` marks the stressed vowel of every word from its context with
+  [RUAccent](https://github.com/Den4ikAI/ruaccent) (за́мок / замо́к, все / всё) and reads it with
+  [a Qwen3-TTS fine-tune that follows the marks](https://huggingface.co/siriusfreak/qwen3-tts-12hz-1.7b-ru-stress-cf)
+  (Apache-2.0; its model card warns that part of its training texts has no declared license).
+  FB2 e-books (`.fb2`, `.fb2.zip`) are read with their chapters, epigraphs and cover, without notes.
 - **Pronunciation dictionary** (`--lexicon`): lines like `颯 = はやて`, `魔王城 = まおうじょう`, `Германн = Герман`
   (works inside Japanese text, which has no spaces). `--dry-run` writes the exact normalized script to check first.
 - **Natural pacing**: sentences are synthesized in chunks of about 15-20 s within a paragraph (never across), the
   model's silences are trimmed and controlled pauses inserted between sentences, paragraphs, headings, scene breaks
   and chapters; loud or quiet sentences are gently leveled. `--pause-scale` makes the reading calmer or faster.
+  The pauses carry the voice's own soft background ("room tone", measured per chapter) instead of digital silence,
+  so the background does not switch off between sentences (`--no-room-tone` to disable).
 - **Automatic quality control**: every chunk is checked (speaking rate for its language, runaway generation, silence,
   clipping, **clipped sentence endings**, **similarity with the narrator's voice**, and a Whisper transcription
   compared with the text — through kana readings for Japanese). Failed chunks are regenerated with another seed; the
-  remaining ones are listed in `qa_report.txt`.
+  remaining ones are listed in `qa_report.txt` (across runs and parallel workers, until a retake passes;
+  `--retry-failed` regenerates them).
 - **Fast**: one worker per GPU (both T4 GPUs of a free Kaggle notebook), the CUDA-graph backend
   [faster-qwen3-tts](https://github.com/andimarafioti/faster-qwen3-tts) with automatic fallback, batching, and
   `--benchmark` to measure the fastest precision, backend and batch size on your GPU (every take is quality
   checked, so a faster setting that damages the audio is never recommended) instead of guessing.
 - **Resumable**: every chunk is cached; an interrupted run (or a 12-hour Kaggle session) continues where it stopped,
-  and editing one paragraph only re-synthesizes that paragraph.
+  and editing one paragraph only re-synthesizes that paragraph. `--time-limit 11.5` stops cleanly before a cloud
+  session ends. With half precision (bf16/fp16) the speech codec stays in float32 (no silent or noisy takes).
 - **Mastering and YouTube**: -16 LUFS / -1.5 dBTP with a linear gain and peak limiter, `.m4b` with chapters and cover,
   `--youtube` for a 1080p `.mp4` and the chapter timestamps of the description, `--episode-hours 2` for ~2-hour parts.
 
@@ -128,7 +139,8 @@ Useful options for long books: `--lexicon names.txt`, `--temperature 0.7` (stead
 
 ## How to install the Command Line tool
 
-If you have Python 3.10-3.12 on your computer, you can install it with pip.
+If you have Python 3.10-3.13 on your computer, you can install it with pip (Kokoro is only installed on Python
+3.10-3.12; on 3.13, as on Kaggle and Colab, Qwen3-TTS is used).
 You also need `espeak-ng` (Kokoro) and `ffmpeg` installed on your machine:
 
 ```bash
@@ -233,7 +245,8 @@ For all the options available, check the help page `audiblez --help` and `audibl
 
 ```bash
 pip install pytest
-pytest test/test_text.py test/test_normalize_ru.py test/test_audio_export.py test/test_pipeline.py test/test_cjk.py
+pytest test/test_text.py test/test_normalize_ru.py test/test_audio_export.py test/test_pipeline.py test/test_cjk.py \
+    test/test_formats.py test/test_stress_ru.py test/test_reliability.py
 ```
 
 ## Author
