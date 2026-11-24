@@ -77,9 +77,10 @@ class ShoutingTest(unittest.TestCase):
         self.assertEqual(normalize_ru('ГЛАВА ПЕРВАЯ', is_heading=True), 'Глава первая.')
 
     def test_abbreviations_untouched(self):
-        self.assertEqual(normalize_ru('Сотрудники МВД и ФСБ приехали.'), 'Сотрудники МВД и ФСБ приехали.')
+        # kept as abbreviations (not lowercased), then read by their letter names
+        self.assertEqual(normalize_ru('Сотрудники МВД и ФСБ приехали.'), 'Сотрудники эм-вэ-дэ и эф-эс-бэ приехали.')
         self.assertEqual(normalize_ru('После ЗАГС ОНИ ПОШЛИ ДОМОЙ.'), 'После ЗАГС они пошли домой.')
-        self.assertEqual(normalize_ru('В СССР и США.'), 'В СССР и США.')
+        self.assertEqual(normalize_ru('В СССР и США.'), 'В эс-эс-эс-эр и США.')
 
     def test_plus_sign(self):
         self.assertEqual(normalize_ru('Было 2+2.'), 'Было два плюс два.')
