@@ -15,3 +15,4 @@ dist
 *.m4b
 *.audiblez/
 !audiblez/voices/*/profile.json
+!kaggle/kernel-metadata.json

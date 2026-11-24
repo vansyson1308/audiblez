@@ -10,6 +10,7 @@ EPILOG = '''examples:
                                                                  Russian, Qwen3-TTS cloned narrator, YouTube videos
                                                                  of about 2 hours each
   audiblez book_ru.epub --dry-run                                check the normalized text (script.txt) first
+  audiblez story.txt --youtube                                   a story script (.txt/.md/.docx/.fb2) to a video
   audiblez book_ru.epub --chapters 1 --voice-profile voices/narrator/candidate_02
                                                                  quick test on the first chapter
   audiblez-voice design --preset ru_male_narrator                create candidate voices to choose from
@@ -23,8 +24,9 @@ available Kokoro voices:
 
 def build_parser():
     parser = argparse.ArgumentParser(prog='audiblez', epilog=EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter,
-                                     description='Generate audiobooks from e-books (epub to m4b / YouTube mp4).')
-    parser.add_argument('epub_file_path', help='Path to the epub file')
+                                     description='Generate audiobooks from e-books and story scripts '
+                                                 '(epub, fb2, txt, md, docx to m4b / YouTube mp4).')
+    parser.add_argument('epub_file_path', metavar='book', help='E-book or story script: .epub, .fb2, .txt, .md or .docx')
     parser.add_argument('-o', '--output', default='.', help='Output folder for the audiobook and temporary files',
                         metavar='FOLDER')
     parser.add_argument('-p', '--pick', default=False, action='store_true',
@@ -55,6 +57,14 @@ def build_parser():
     g.add_argument('--dtype', default='auto', help='auto (default), bfloat16, float16, float32')
     g.add_argument('--batch-size', type=int, default=0, help='Chunks synthesized together (default: 4 on a CUDA GPU, '
                                                           '1 on CPU; 8 can be faster on large GPUs)')
+    g.add_argument('--qwen-backend', choices=['auto', 'standard', 'fast'], default='auto',
+                   help='Qwen3-TTS runtime: fast = faster-qwen3-tts CUDA graphs (2-5x faster per GPU, needs its own '
+                        'environment); auto (default) = fast when it is installed and a GPU is used')
+    g.add_argument('--gpus', default='auto', metavar='N',
+                   help='Synthesize on N GPUs in parallel, one worker each (default auto: every visible GPU, e.g. the '
+                        '2 T4 of Kaggle)')
+    g.add_argument('--time-limit', type=float, metavar='HOURS',
+                   help='Stop synthesizing after this many hours (cleanly: run again to continue), e.g. 11.5 on Kaggle')
     g.add_argument('--temperature', type=float, help='Qwen3-TTS sampling temperature (default 0.9; lower = steadier)')
     g.add_argument('--top-p', type=float)
     g.add_argument('--top-k', type=int)
@@ -65,10 +75,17 @@ def build_parser():
     g.add_argument('--lexicon', metavar='FILE', help='Pronunciation dictionary: lines "word = replacement"')
     g.add_argument('--no-normalize', action='store_true', help='Do not normalize numbers/abbreviations/ё')
     g.add_argument('--keep-stress-marks', action='store_true', help='Keep combining stress marks (U+0301)')
+    g.add_argument('--stress', choices=['off', 'ruaccent'], default='off',
+                   help='Russian: mark the stressed vowel of every word with RUAccent (homographs, names...) and read '
+                        'with a Qwen3-TTS fine-tune that follows the marks (default model with ruaccent: '
+                        'siriusfreak/qwen3-tts-12hz-1.7b-ru-stress-cf). pip install ruaccent')
     g.add_argument('--no-title', action='store_true', help='Do not read the book title and author at the start')
     g.add_argument('--max-chunk-chars', type=int, help='Maximum characters per synthesized chunk (default: 300 for '
                                                        'Qwen3-TTS, 400 for Kokoro)')
     g.add_argument('--pause-scale', type=float, default=1.0, help='Multiply all pauses (e.g. 1.2 for a calmer pace)')
+    g.add_argument('--no-room-tone', action='store_true',
+                   help='Digital silence in the pauses (default: the soft background noise of the voice, like a real '
+                        'recording, so that the background does not switch off between sentences)')
 
     g = parser.add_argument_group('quality control')
     g.add_argument('--no-qa', action='store_true', help='Disable automatic checks and retries')
@@ -106,8 +123,10 @@ def settings_from_args(args):
         max_chunk_chars=args.max_chunk_chars, qa=not args.no_qa, asr=args.asr, asr_model=args.asr_model,
         max_retries=args.max_retries, retry_failed=args.retry_failed, normalize=not args.no_normalize,
         lexicon=args.lexicon, keep_stress=args.keep_stress_marks, announce_title=not args.no_title,
-        pause_scale=args.pause_scale, formats=formats, loudness=args.loudness, episode_hours=args.episode_hours,
-        cover=args.cover, keep_master=args.keep_master, dry_run=args.dry_run, chapters=args.chapters)
+        pause_scale=args.pause_scale, room_tone=not args.no_room_tone, formats=formats, loudness=args.loudness,
+        episode_hours=args.episode_hours,
+        cover=args.cover, keep_master=args.keep_master, dry_run=args.dry_run, chapters=args.chapters,
+        qwen_backend=args.qwen_backend, gpus=args.gpus, time_limit=args.time_limit, stress=args.stress)
 
 
 def cli_main(argv=None):

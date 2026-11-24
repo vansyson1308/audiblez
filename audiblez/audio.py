@@ -159,6 +159,57 @@ def silence(seconds, sr):
     return np.zeros(int(round(max(0.0, seconds) * sr)), dtype=np.float32)
 
 
+def estimate_noise_floor(audios, sr):
+    """
+    Level (dBFS) of the background inside the pauses of the synthesized chunks, i.e. the "room tone" of the voice
+    (about -65 dBFS for Qwen3-TTS, ~48 dB under the speech). None when it cannot be measured (e.g. clean synthetic
+    tones in the tests, or a model that outputs digital silence).
+    """
+    quiet = []
+    for a in audios:
+        db, _ = _frame_db(np.asarray(a, dtype=np.float32), sr)
+        if len(db) >= 20:
+            q = db[(db <= _silence_threshold_db(db)) & (db > -110.0)]
+            quiet.append(q)
+    quiet = np.concatenate(quiet) if quiet else np.zeros(0)
+    if len(quiet) < 30:
+        return None
+    return float(np.clip(np.median(quiet), -85.0, -55.0))
+
+
+class RoomTone:
+    """
+    Pauses filled with a soft (pink) noise at the level of the voice's own background, instead of digital silence:
+    the background no longer switches off between sentences (audible "gating" on headphones), as audiobook
+    standards require (ACX: room tone, not digital silence, in the pauses).
+    """
+
+    def __init__(self, level_db, sr, seed=0, seconds=8.0):
+        self.sr = sr
+        rng = np.random.default_rng(seed)
+        n = int(seconds * sr)
+        spectrum = np.fft.rfft(rng.standard_normal(n))
+        f = np.fft.rfftfreq(n, 1.0 / sr)
+        spectrum[1:] /= np.sqrt(f[1:] / f[1])  # 1/f power: pink noise
+        spectrum[0] = 0.0
+        spectrum[f < 40.0] = 0.0  # no rumble
+        noise = np.fft.irfft(spectrum, n)
+        noise *= 10 ** (level_db / 20) / (np.sqrt(np.mean(noise ** 2)) + 1e-12)
+        self.buffer = noise.astype(np.float32)
+        self.pos = int(rng.integers(0, n))
+
+    def __call__(self, seconds):
+        n = int(round(max(0.0, seconds) * self.sr))
+        out = np.empty(n, dtype=np.float32)
+        done = 0
+        while done < n:
+            k = min(n - done, len(self.buffer) - self.pos)
+            out[done:done + k] = self.buffer[self.pos:self.pos + k]
+            done += k
+            self.pos = (self.pos + k) % len(self.buffer)
+        return fade_edges(out, self.sr, 5, 5) if n else out
+
+
 # ---------------------------------------------------------------------------------------------------------------------
 # Quality checks
 # ---------------------------------------------------------------------------------------------------------------------
@@ -217,6 +268,7 @@ def analyze_chunk(wav, sr, text, qa: QAConfig, raw_wav=None, hit_token_limit=Fal
 
 
 def _normalize_for_cer(text):
+    text = text.replace('\u0301', '').replace('\u0300', '')  # stress marks (--stress) are not letters
     text = text.lower().replace('ё', 'е')
     text = re.sub(r'[^\w\s]|_', ' ', text)
     return re.sub(r'\s+', ' ', text).strip()
@@ -247,17 +299,31 @@ class AsrVerifier:
     """Transcribes synthesized chunks with faster-whisper and measures the character error rate."""
 
     def __init__(self, language, model_size=None, device='auto'):
-        from faster_whisper import WhisperModel
-        import torch
-        if device == 'auto':
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        if model_size is None:
-            model_size = 'large-v3-turbo' if device == 'cuda' else 'small'
-        compute_type = 'float16' if device == 'cuda' else 'int8'
-        print(f'Loading Whisper {model_size} on {device} for automatic quality control...')
-        self.model = WhisperModel(model_size, device=device if device in ('cuda', 'cpu') else 'cpu',
-                                  compute_type=compute_type)
+        import importlib.util
+        if importlib.util.find_spec('faster_whisper') is None:
+            raise ImportError('faster-whisper is not installed')
+        self.model_size = model_size
+        self.device = device
         self.language = (language or 'en')[:2]
+        self._model = None  # loaded on first use: nothing to load when every chunk comes from the cache
+
+    @property
+    def model(self):
+        if self._model is None:
+            from faster_whisper import WhisperModel
+            import torch
+            device = self.device or 'auto'
+            if device == 'auto':
+                device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            device, _, index = device.partition(':')  # "cuda:1"
+            if device not in ('cuda', 'cpu'):
+                device = 'cpu'  # Apple MPS is not supported by CTranslate2
+            model_size = self.model_size or ('large-v3-turbo' if device == 'cuda' else 'small')
+            compute_type = 'float16' if device == 'cuda' else 'int8'
+            print(f'Loading Whisper {model_size} on {device} for automatic quality control...')
+            self._model = WhisperModel(model_size, device=device, device_index=int(index or 0),
+                                       compute_type=compute_type)
+        return self._model
 
     def transcribe(self, wav, sr):
         if sr != 16000:

@@ -25,7 +25,8 @@ jobs:
       - name: run unit tests (no model download needed)
         run: |
           pip install pytest
-          python -m pytest -q test/test_text.py test/test_normalize_ru.py test/test_audio_export.py test/test_pipeline.py
+          python -m pytest -q test/test_text.py test/test_normalize_ru.py test/test_audio_export.py test/test_pipeline.py \
+            test/test_sources.py test/test_stress_ru.py test/test_parallel.py test/test_bench.py
   windows-git-clone-and-run:
     runs-on: windows-latest
     steps:

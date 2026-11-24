@@ -84,6 +84,9 @@ class Engine:
     def fingerprint(self) -> str:
         raise NotImplementedError
 
+    def prepare(self):
+        """Load what synthesis needs (models...). Errors here are fatal, not retried like synthesis errors."""
+
     def synthesize(self, texts, seed=0):
         raise NotImplementedError
 
@@ -253,7 +256,24 @@ def load_qwen_model(model_id, device='auto', dtype='auto'):
         has_flash = importlib.util.find_spec('flash_attn') is not None
         kwargs['attn_implementation'] = 'flash_attention_2' if has_flash else 'sdpa'
     print(f'Loading {model_id} on {device} ({str(torch_dtype).replace("torch.", "")})...')
-    return Qwen3TTSModel.from_pretrained(model_id, **kwargs)
+    model = Qwen3TTSModel.from_pretrained(model_id, **kwargs)
+    keep_codec_fp32(model, torch_dtype)
+    return model
+
+
+def keep_codec_fp32(model, torch_dtype):
+    """
+    Run the speech codec (codes -> waveform decoder, and the reference encoder) in float32 when the language model
+    runs in half precision. Its SnakeBeta activations can overflow in bf16/fp16 and produce silent or noisy audio;
+    the decoder is a small part of the total time, so float32 there costs a few percent at most.
+    """
+    import torch
+    if torch_dtype == torch.float32:
+        return
+    tokenizer = getattr(getattr(model, 'model', None), 'speech_tokenizer', None)
+    codec = getattr(tokenizer, 'model', None)
+    if codec is not None and hasattr(codec, 'float'):
+        codec.float()
 
 
 def load_reference_audio(path, target_sr=24000):
@@ -274,6 +294,7 @@ def load_reference_audio(path, target_sr=24000):
 
 class QwenEngine(Engine):
     name = 'qwen'
+    backend = 'standard'
     stochastic = True
     default_max_chars = 300
 
@@ -302,16 +323,40 @@ class QwenEngine(Engine):
         if mode == 'design' and not self.instruct:
             raise ValueError('Qwen voice-design mode needs an --instruct voice description')
         self.device = resolve_device(device) if model is None else str(getattr(model, 'device', 'cpu'))
-        self.model = model or load_qwen_model(self.model_id, self.device, dtype)
-        self.prompt = None
+        self.dtype = dtype
+        self._model = model
+        self._prompt = None
         if mode == 'clone':
-            ref_audio, ref_sr = load_reference_audio(voice_profile.audio_path)
-            duration = len(ref_audio) / ref_sr
+            import soundfile as sf
+            try:
+                duration = sf.info(str(voice_profile.audio_path)).duration
+            except Exception:
+                duration = 0
             if duration > 20:
                 print(f'\033[93mWarning: the reference audio is {duration:.0f}s long. Cloning is most reliable with '
                       f'6-15 seconds of clean speech; long references increase the failure rate.\033[0m')
-            self.prompt = self.model.create_voice_clone_prompt(
-                ref_audio=(ref_audio, ref_sr), ref_text=voice_profile.text, x_vector_only_mode=x_vector_only)
+
+    # The model (several GB) is loaded on first use, so that runs where every chunk is already in the cache, dry
+    # runs, and the coordinator of parallel GPU workers do not load it.
+    @property
+    def model(self):
+        if self._model is None:
+            self._model = self.load_model()
+        return self._model
+
+    def load_model(self):
+        return load_qwen_model(self.model_id, self.device, self.dtype)
+
+    def prepare(self):
+        return self.model, self.prompt
+
+    @property
+    def prompt(self):
+        if self._prompt is None and self.mode == 'clone':
+            ref_audio, ref_sr = load_reference_audio(self.voice_profile.audio_path)
+            self._prompt = self.model.create_voice_clone_prompt(
+                ref_audio=(ref_audio, ref_sr), ref_text=self.voice_profile.text, x_vector_only_mode=self.x_vector_only)
+        return self._prompt
 
     def fingerprint(self):
         parts = dict(model=self.model_id, mode=self.mode, lang=self.language, speaker=self.speaker,
@@ -356,3 +401,88 @@ class QwenEngine(Engine):
         who = {'clone': f'cloned voice {getattr(self.voice_profile, "path", None) or self.voice_profile.audio_path}',
                'custom': f'speaker {self.speaker}', 'design': f'designed voice "{self.instruct}"'}[self.mode]
         return f'{self.model_id} ({self.qwen_language}), {who}'
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Qwen3-TTS through faster-qwen3-tts (CUDA graphs)
+# ---------------------------------------------------------------------------------------------------------------------
+
+def has_fast_backend():
+    import importlib.util
+    return importlib.util.find_spec('faster_qwen3_tts') is not None
+
+
+class FastQwenEngine(QwenEngine):
+    """
+    The same Qwen3-TTS model, voice prompt and sampling, run by faster-qwen3-tts (MIT,
+    https://github.com/andimarafioti/faster-qwen3-tts): static KV cache + CUDA graphs remove the kernel-launch overhead
+    that dominates Qwen3-TTS decoding. Published single-stream speed for the 1.7B model: 0.45x -> 0.93x real time on
+    a Tesla T4, 0.82x -> 4.2x on an RTX 4090. One text at a time (the graphs are captured for batch size 1); on
+    several GPUs use one worker per GPU (audiblez does it automatically).
+
+    The output is algorithmically equivalent but not bit-identical to the standard backend, so both share the same
+    synthesis cache: chunks rendered on a cloud GPU can be retaken locally with the standard backend.
+    Needs a CUDA GPU and its own environment (it requires transformers 5 and the qwen-tts-hf package, which replaces
+    qwen-tts; qwen-tts-hf 0.1.1.post1 only loads the model with transformers 5.15-5.16):
+        pip install faster-qwen3-tts "transformers>=5.15.1,<5.17"
+    see docs/huong-dan-audiobook-tieng-nga.md.
+    """
+    backend = 'fast'
+    max_seq_len = 2048  # static KV cache: reference prompt + text + generated codes
+    prompt_reserve = 640  # room kept for the prefill (reference codes and text) inside max_seq_len
+
+    def load_model(self):
+        import importlib.util
+        import torch
+        from faster_qwen3_tts import FasterQwen3TTS
+        if not str(self.device).startswith('cuda') or not torch.cuda.is_available():
+            raise RuntimeError('The fast Qwen3-TTS backend needs a CUDA GPU (use --qwen-backend standard on CPU)')
+        torch_dtype = resolve_dtype(self.dtype, self.device)
+        device = 'cuda:0' if self.device == 'cuda' else self.device
+        attn = 'flash_attention_2' if importlib.util.find_spec('flash_attn') is not None else 'sdpa'
+        print(f'Loading {self.model_id} on {device} ({str(torch_dtype).replace("torch.", "")}) '
+              f'with faster-qwen3-tts (CUDA graphs)...')
+        model = FasterQwen3TTS.from_pretrained(self.model_id, device=device, dtype=torch_dtype,
+                                               attn_implementation=attn, max_seq_len=self.max_seq_len)
+        keep_codec_fp32(model.model, torch_dtype)
+        return model
+
+    @property
+    def prompt(self):
+        if self._prompt is None and self.mode == 'clone':
+            ref_audio, ref_sr = load_reference_audio(self.voice_profile.audio_path)
+            # the same prompt as the standard backend (no extra silence appended to the reference)
+            self._prompt = self.model.model.create_voice_clone_prompt(
+                ref_audio=(ref_audio, ref_sr), ref_text=self.voice_profile.text, x_vector_only_mode=self.x_vector_only)
+        return self._prompt
+
+    def max_tokens(self, text):
+        return min(self.token_budget(text), self.max_seq_len - self.prompt_reserve)
+
+    def synthesize(self, texts, seed=0):
+        seed_everything(seed)
+        out = []
+        for text in texts:
+            kwargs = dict(self.gen_kwargs, max_new_tokens=self.max_tokens(text))
+            if self.mode == 'clone':
+                wavs, sr = self.model.generate_voice_clone(text=text, language=self.qwen_language,
+                                                           voice_clone_prompt=self.prompt, **kwargs)
+            elif self.mode == 'custom':
+                wavs, sr = self.model.generate_custom_voice(text=text, speaker=self.speaker,
+                                                            language=self.qwen_language,
+                                                            instruct=self.instruct or None, **kwargs)
+            else:
+                wavs, sr = self.model.generate_voice_design(text=text, instruct=self.instruct,
+                                                            language=self.qwen_language, **kwargs)
+            wav = np.asarray(wavs[0], dtype=np.float32).reshape(-1)
+            if sr != self.sample_rate:
+                import librosa
+                wav = librosa.resample(wav, orig_sr=sr, target_sr=self.sample_rate)
+            out.append(wav)
+        return out
+
+    def hit_token_limit(self, wav, text):
+        return len(wav) / self.sample_rate >= self.max_tokens(text) / QWEN_FRAME_RATE - 0.5
+
+    def describe(self):
+        return super().describe() + ' [faster-qwen3-tts CUDA graphs]'
