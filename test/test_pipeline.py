@@ -239,5 +239,94 @@ class PipelineTest(unittest.TestCase):
         self.assertTrue(res['chapters'][0].segments[0].text.startswith('Глава вторая'))
 
 
+class ShortReferenceTest(unittest.TestCase):
+    """audiblez-voice finds the short reference of a new voice: a pause after a sentence, with the cut in 4-8 s."""
+    TEXT = 'Раз два три. Четыре пять шесть, семь восемь. Девять десять одиннадцать.'
+    # tone bursts, one per word; the first sentence ends too early (1.70 s), the comma pause 4.20-4.80 s does not end
+    # a sentence, the second sentence ends at 6.05 s and is followed by an inhale at INHALE before the third
+    WORDS = [(' Раз', 0.10, 0.60), (' два', 0.65, 1.15), (' три.', 1.20, 1.70),
+             (' Четыре', 2.30, 2.90), (' пять', 2.95, 3.55), (' шесть,', 3.60, 4.20),
+             (' семь', 4.80, 5.40), (' восемь.', 5.45, 6.05),
+             (' Девять', 7.60, 8.20), (' десять', 8.25, 8.85), (' одиннадцать.', 8.90, 9.70)]
+    INHALE = (6.55, 6.85)
+    # Whisper's times are approximate: it hears "восемь." end at 6.25 s and "Девять" start at 7.30 s
+    HEARD = [(w, 7.30, e) if w == ' Девять' else (w, s, 6.25) if w == ' восемь.' else (w, s, e) for w, s, e in WORDS]
+
+    def reference(self, inhale_db=-40.0, floor_db=-60.0):
+        """The synthetic reference; inhale and noise floor in dB relative to the RMS of the bursts."""
+        rng = np.random.default_rng(1)
+        wav = np.zeros(int(9.95 * SR))
+        for k, (_, start, end) in enumerate(self.WORDS):
+            t = np.arange(int(start * SR), int(end * SR)) / SR
+            fade = np.clip(np.minimum(t - start, end - t) / 0.01, 0, 1)
+            wav[int(start * SR):int(start * SR) + len(t)] = 0.3 * np.sin(2 * np.pi * (150 + 20 * k) * t) * fade
+        rms = np.sqrt(np.mean(wav ** 2))
+        wav += rng.normal(0, rms * 10 ** (floor_db / 20), len(wav))
+        a, b = (int(x * SR) for x in self.INHALE)
+        wav[a:b] += rng.normal(0, rms * 10 ** (inhale_db / 20), b - a)
+        return wav.astype(np.float32)
+
+    @staticmethod
+    def level(wav, seconds):
+        """dB of the audio within ±80 ms of a cut, relative to the RMS of the clip (as for the bundled voices)."""
+        around = wav[int((seconds - 0.08) * SR):int((seconds + 0.08) * SR)]
+        return 20 * np.log10(np.sqrt(np.mean(around ** 2)) / np.sqrt(np.mean(wav ** 2)))
+
+    def test_cut_in_the_pause_before_the_inhale(self):
+        from audiblez.voice_tool import find_short_reference
+        # an inhale louder than the threshold, and one quieter (it does not interrupt the quiet stretch)
+        for inhale_db in (-25.0, -40.0):
+            wav = self.reference(inhale_db=inhale_db)
+            short, why = find_short_reference(wav, SR, self.TEXT, self.HEARD, 'ru')
+            self.assertIsNone(why)
+            self.assertEqual(short['text'], 'Раз два три. Четыре пять шесть, семь восемь.')
+            # ±80 ms around the cut lie in the silence after "восемь." and before the inhale
+            self.assertGreaterEqual(short['seconds'], 6.05 + 0.08, inhale_db)
+            self.assertLessEqual(short['seconds'], self.INHALE[0] - 0.08, inhale_db)
+            self.assertLess(self.level(wav, short['seconds']), -35)
+
+    def test_profile_declares_the_short_reference(self):
+        from audiblez.engines import VoiceProfile, load_reference_audio
+        from audiblez.voice_tool import _write_profile
+        with tempfile.TemporaryDirectory() as tmp:
+            notes = []
+            folder = _write_profile(Path(tmp) / 'voice', self.reference(), SR, self.TEXT + '\n', 'ru',
+                                    dict(source='test'), words=self.HEARD, log=notes.append)
+            profile = VoiceProfile.load(folder)
+            seconds, text = profile.short_reference
+            self.assertTrue(profile.text.startswith(text))
+            wav, sr = load_reference_audio(profile.audio_path)
+            self.assertEqual(sr, SR)
+            self.assertLess(self.level(wav, seconds), -35)
+            self.assertIn(f'the first {seconds:.2f} s', notes[0])
+            # without Whisper's word times: no short reference, and nothing to say about it
+            notes.clear()
+            folder = _write_profile(Path(tmp) / 'no_asr', self.reference(), SR, self.TEXT, 'ru', {}, log=notes.append)
+            self.assertIsNone(VoiceProfile.load(folder).short_reference)
+            self.assertEqual(notes, [])
+
+    def test_no_short_reference_without_a_clear_pause(self):
+        from audiblez.engines import VoiceProfile
+        from audiblez.voice_tool import _write_profile, find_short_reference
+        # a noisy recording: no pause is 35 dB quieter than the speech
+        noisy = self.reference(floor_db=-25.0)
+        short, why = find_short_reference(noisy, SR, self.TEXT, self.HEARD, 'ru')
+        self.assertIsNone(short)
+        self.assertIn('35 dB quieter', why)
+        with tempfile.TemporaryDirectory() as tmp:
+            notes = []
+            folder = _write_profile(Path(tmp) / 'voice', noisy, SR, self.TEXT, 'ru', {}, words=self.HEARD,
+                                    log=notes.append)
+            self.assertIsNone(VoiceProfile.load(folder).short_reference)
+            self.assertNotIn('short_reference', json.loads((folder / 'profile.json').read_text(encoding='utf-8')))
+            self.assertEqual(len(notes), 1)
+            self.assertIn('no short reference', notes[0])
+        # Whisper did not hear the end of the sentence ("восем"): the cut could fall anywhere, so there is none
+        misheard = [(' восем', s, e) if w == ' восемь.' else (w, s, e) for w, s, e in self.HEARD]
+        short, why = find_short_reference(self.reference(), SR, self.TEXT, misheard, 'ru')
+        self.assertIsNone(short)
+        self.assertIn('did not hear the end of "восемь."', why)
+
+
 if __name__ == '__main__':
     unittest.main()
