@@ -41,6 +41,8 @@ qwen = ["qwen-tts (>=0.1.1,<0.2.0)"]
 fast = ["faster-qwen3-tts (>=0.5.4,<0.6)", "transformers (>=5.15.1,<5.17)"]
 # Automatic quality control: every synthesized sentence is transcribed with Whisper and regenerated if it differs
 asr = ["faster-whisper (>=1.1)"]
+# Russian stress marks (--stress ruaccent)
+stress = ["ruaccent (>=1.6)"]
 # Japanese: correct readings of numbers with counters (3本, 4人, 14日) and kana-based Whisper checks
 ja = ["pyopenjtalk-plus (>=0.4.1)", "fugashi[unidic-lite] (>=1.3)"]
 gui = ["wxpython (>=4.2)", "pillow (>=10)"]

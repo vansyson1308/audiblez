@@ -77,6 +77,10 @@ def build_parser():
     g.add_argument('--lexicon', metavar='FILE', help='Pronunciation dictionary: lines "word = replacement"')
     g.add_argument('--no-normalize', action='store_true', help='Do not normalize numbers/abbreviations/ё')
     g.add_argument('--keep-stress-marks', action='store_true', help='Keep combining stress marks (U+0301)')
+    g.add_argument('--stress', choices=['off', 'ruaccent'], default='off',
+                   help='Russian: mark the stressed vowel of every word with RUAccent (homographs, names, ё) and read '
+                        'with a Qwen3-TTS fine-tune that follows the marks (siriusfreak/qwen3-tts-12hz-1.7b-ru-'
+                        'stress-cf unless --qwen-model is given). pip install "audiblez[stress]"')
     g.add_argument('--no-title', action='store_true', help='Do not read the book title and author at the start')
     g.add_argument('--max-chunk-chars', type=int, help='Maximum characters per synthesized chunk (default: 300 for '
                                                        'Qwen3-TTS, 400 for Kokoro)')
@@ -118,7 +122,8 @@ def settings_from_args(args):
         backend=args.backend, gpus=args.gpus,
         max_chunk_chars=args.max_chunk_chars, qa=not args.no_qa, asr=args.asr, asr_model=args.asr_model,
         max_retries=args.max_retries, retry_failed=args.retry_failed, normalize=not args.no_normalize,
-        lexicon=args.lexicon, keep_stress=args.keep_stress_marks, announce_title=not args.no_title,
+        lexicon=args.lexicon, keep_stress=args.keep_stress_marks, stress=args.stress,
+        announce_title=not args.no_title,
         pause_scale=args.pause_scale, formats=formats, loudness=args.loudness, episode_hours=args.episode_hours,
         cover=args.cover, keep_master=args.keep_master, dry_run=args.dry_run, chapters=args.chapters)
 

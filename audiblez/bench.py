@@ -77,6 +77,7 @@ def run_benchmark(file_path, settings, output_folder='.', n_chunks=6, log=print)
         raise SystemExit('No text to benchmark')
     language = core.resolve_engine_choice(settings, core.load_source(file_path).language)['language']
     choice = core.resolve_engine_choice(settings, language)
+    settings = core.with_stress_model(settings, choice)  # --stress ruaccent: the texts carry stress marks
     if choice['engine'] != 'qwen':
         raise SystemExit('The benchmark compares Qwen3-TTS backends; Kokoro has a single configuration.')
     device = resolve_device(settings.device)

@@ -79,6 +79,7 @@ class Settings:
     normalize: bool = True
     lexicon: Optional[str] = None
     keep_stress: bool = False
+    stress: str = 'off'  # off | ruaccent (Russian: automatic stress marks + a model that follows them)
     announce_title: bool = True
     pause_scale: float = 1.0
     # output
@@ -402,6 +403,32 @@ def resolve_engine_choice(settings: Settings, book_language):
             raise SystemExit(f'No voice for "{language}". Create one with "audiblez-voice design" and pass '
                              f'--voice-profile, or pass --ref-audio/--ref-text, or --speaker.')
     return dict(engine='qwen', mode=mode, language=language, voice_profile=profile)
+
+
+def with_stress_model(settings: Settings, choice):
+    """--stress ruaccent: read with the Qwen3-TTS fine-tune that follows the stress marks (unless --qwen-model)."""
+    if (settings.stress == 'ruaccent' and not settings.qwen_model and choice.get('engine') == 'qwen'
+            and choice.get('language') == 'ru' and choice.get('mode') == 'clone'):
+        from audiblez.stress_ru import STRESS_MODEL
+        return dataclasses.replace(settings, qwen_model=STRESS_MODEL)
+    return settings
+
+
+def make_stressor(settings: Settings, choice, work_dir=None):
+    """Russian stress marks (--stress ruaccent), or None."""
+    if settings.stress in (None, '', 'off'):
+        return None
+    if settings.stress != 'ruaccent':
+        raise SystemExit(f'Unknown --stress mode "{settings.stress}" (expected off or ruaccent)')
+    if choice.get('language') != 'ru' or choice.get('engine') != 'qwen':
+        print('\033[93m--stress ruaccent only applies to Russian with Qwen3-TTS: ignored.\033[0m')
+        return None
+    from audiblez.stress_ru import STRESS_MODEL, Stressor
+    model = with_stress_model(settings, choice).qwen_model
+    if model != STRESS_MODEL:
+        print(f'\033[93mNote: {model or "the base model"} may not follow stress marks; {STRESS_MODEL} is the '
+              f'model trained to read them.\033[0m')
+    return Stressor(Path(work_dir) / 'stress_cache.json' if work_dir else None)
 
 
 def _voice_profile_for(choice, settings: Settings):
@@ -797,6 +824,11 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
 
     choice = resolve_engine_choice(settings, book_language)
     language = choice['language']
+    work_dir = output_folder / f'{stem}.audiblez'
+    work_dir.mkdir(parents=True, exist_ok=True)
+    stressor = make_stressor(settings, choice, work_dir)
+    if stressor is not None:  # marks of the e-book and of the lexicon are kept, RUAccent adds the others
+        settings = dataclasses.replace(with_stress_model(settings, choice), keep_stress=True)
     lexicon = Lexicon.load(settings.lexicon) if settings.lexicon else None
     if lexicon:
         print(f'Loaded {len(lexicon)} pronunciation rules from {settings.lexicon}')
@@ -829,8 +861,14 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
         chapters[0].segments = intro_segments(title, creator, language, max_chars, settings, lexicon) + \
                                chapters[0].segments
 
-    work_dir = output_folder / f'{stem}.audiblez'
-    work_dir.mkdir(parents=True, exist_ok=True)
+    if stressor is not None:
+        t0 = time.time()
+        for c in chapters:
+            for seg in c.segments:
+                seg.text = stressor(seg.text)
+        stressor.save()
+        print(f'Stress marks placed by RUAccent ({time.time() - t0:.0f}s). Check them in script.txt; fix a word '
+              f'with a --lexicon rule such as "замок = замо́к".')
     all_texts = [(c.title, s.text) for c in chapters for s in c.segments]
     total_chars = sum(len(t) for _, t in all_texts)
     est_hours = sum(textmod.count_letters(t) for _, t in all_texts) / profile['rate'] / 3600 / settings.speed
@@ -988,7 +1026,10 @@ def preview_audio(text, voice=None, speed=1.0, settings=None, language=None):
     """Synthesize a short text (GUI preview). Returns (float32 audio, sample_rate)."""
     settings = settings or Settings(voice=voice, speed=speed, language=language)
     choice = resolve_engine_choice(settings, language)
-    key = (json.dumps(choice, sort_keys=True), settings.speed, settings.device, settings.speaker, settings.instruct)
+    stressor = make_stressor(settings, choice)
+    settings = with_stress_model(settings, choice)
+    key = (json.dumps(choice, sort_keys=True), settings.speed, settings.device, settings.speaker, settings.instruct,
+           settings.qwen_model)
     engine = _PREVIEW_ENGINES.get(key)
     if engine is None:
         _PREVIEW_ENGINES.clear()  # keep a single model in memory
@@ -997,8 +1038,10 @@ def preview_audio(text, voice=None, speed=1.0, settings=None, language=None):
     max_chars = settings.max_chunk_chars or (QwenEngine if choice['engine'] == 'qwen' else KokoroEngine).default_max_chars
     segments = []
     for block in textmod.text_to_blocks(text):
-        t = normalize_text(block.text, choice['language'], is_heading=block.kind == HEADING)
-        segments += [Segment(c.text, PAUSES['sentence']) for c in chunk_paragraph(t, choice['language'], max_chars)]
+        t = normalize_text(block.text, choice['language'], is_heading=block.kind == HEADING,
+                           keep_stress=stressor is not None)
+        segments += [Segment(stressor(c.text) if stressor else c.text, PAUSES['sentence'])
+                     for c in chunk_paragraph(t, choice['language'], max_chars)]
     audios = [clean_chunk(w, engine.sample_rate) for w in engine.synthesize([s.text for s in segments])] if segments else []
     wav, _ = assemble_chapter(segments, audios, engine.sample_rate) if segments else (np.zeros(0, np.float32), [])
     return wav, engine.sample_rate
