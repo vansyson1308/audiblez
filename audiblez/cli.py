@@ -70,6 +70,8 @@ def build_parser():
     g.add_argument('--backend', choices=['auto', 'qwen-tts', 'faster'], default='auto',
                    help='Qwen3-TTS backend: faster = CUDA graphs (pip install faster-qwen3-tts); auto uses it when '
                         'installed on a CUDA GPU and falls back to qwen-tts on any error')
+    g.add_argument('--time-limit', type=float, metavar='HOURS',
+                   help='Stop synthesizing after this many hours, cleanly (run again to continue), e.g. 11.5 on Kaggle')
     g.add_argument('--gpus', default='auto',
                    help='Parallel workers: auto (one per GPU when there are 2+, e.g. Kaggle 2xT4), off, or "0,1"')
 
@@ -122,7 +124,7 @@ def settings_from_args(args):
         ref_audio=args.ref_audio, ref_text=args.ref_text, speaker=args.speaker, instruct=args.instruct,
         x_vector_only=args.x_vector_only, temperature=args.temperature, top_p=args.top_p, top_k=args.top_k,
         repetition_penalty=args.repetition_penalty, seed=args.seed, batch_size=args.batch_size,
-        backend=args.backend, gpus=args.gpus,
+        backend=args.backend, gpus=args.gpus, time_limit=args.time_limit,
         max_chunk_chars=args.max_chunk_chars, qa=not args.no_qa, asr=args.asr, asr_model=args.asr_model,
         max_retries=args.max_retries, retry_failed=args.retry_failed, normalize=not args.no_normalize,
         lexicon=args.lexicon, keep_stress=args.keep_stress_marks, stress=args.stress,
