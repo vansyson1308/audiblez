@@ -7,5 +7,9 @@
   "language": "ru",
   "duration": 13.04,
   "name": "ru_female_narrator",
-  "license": "Generated with Qwen3-TTS-12Hz-1.7B-VoiceDesign (Apache-2.0); synthetic voice, not a real person"
+  "license": "Generated with Qwen3-TTS-12Hz-1.7B-VoiceDesign (Apache-2.0); synthetic voice, not a real person",
+  "short_reference": {
+    "seconds": 5.58,
+    "text": "Тишина стояла такая, что было слышно, как тикают часы в соседней комнате."
+  }
 }

@@ -517,6 +517,14 @@ def make_verifier(engine, language, settings: Settings, log=print):
         return None
 
 
+def cache_file_ok(path):
+    """A cached chunk exists and is not empty (an empty file was left by older versions for takes without speech)."""
+    try:
+        return path.stat().st_size > 0
+    except OSError:
+        return False
+
+
 def load_failed(cache_dir):
     """
     {key: entry} of the chunks whose latest take did not pass the quality checks, from qa_failed.jsonl (appended by
@@ -575,7 +583,7 @@ class CacheView:
     def is_cached(self, text, retry_failed=False, since=None):
         """With retry_failed, a failed chunk counts as missing unless it was regenerated after `since`."""
         path = self.path(text)
-        if not path.exists():
+        if not cache_file_ok(path):
             return False
         if retry_failed and chunk_key(self.fingerprint, text) in self.failed_keys:
             return since is not None and path.stat().st_mtime >= since
@@ -625,7 +633,7 @@ class Synthesizer:
         return self.cache_dir / f'{self.key(text)}.flac'
 
     def is_cached(self, text):
-        if not self.cache_path(text).exists():
+        if not cache_file_ok(self.cache_path(text)):
             return False
         return not (self.settings.retry_failed and self.key(text) in self.failed_keys)
 
@@ -691,8 +699,9 @@ class Synthesizer:
             for k, wav in zip(pending, raw):
                 text = texts[k]
                 cleaned, qa = self.evaluate(wav, text)
-                if k not in best or qa.score < best[k][0]:
-                    best[k] = (qa.score, cleaned, qa)
+                rank = (len(cleaned) == 0, qa.score)  # a take with some speech beats an empty one
+                if k not in best or rank < best[k][0]:
+                    best[k] = (rank, cleaned, qa)
                 if not qa.ok and attempt < self.qa_cfg.max_retries:
                     still.append(k)
                     self.log(f'\033[93m  ↻ retry {attempt + 1}/{self.qa_cfg.max_retries}: {"; ".join(qa.reasons)}'
@@ -702,8 +711,10 @@ class Synthesizer:
             self.stats.synth_audio += sum(len(w) for w in raw) / sr
             pending = still
             attempt += 1
-        for k, (score, wav, qa) in best.items():
+        for k, (_, wav, qa) in best.items():
             text = texts[k]
+            if len(wav) == 0:  # no take had any speech: a short silence keeps the book going (listed in the report)
+                wav = np.zeros(int(0.2 * sr), np.float32)
             tmp = self.cache_path(text).with_suffix('.tmp.flac')
             soundfile.write(str(tmp), wav, sr, subtype='PCM_16', format='FLAC')
             tmp.replace(self.cache_path(text))  # atomic: a crash never leaves a truncated chunk in the cache

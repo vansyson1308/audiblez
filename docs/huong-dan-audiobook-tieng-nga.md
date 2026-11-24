@@ -107,6 +107,18 @@ khi mỗi câu có một từ đồng hình. Lưu ý:
   ру́ки, по-моему́…) được audiblez tự sửa; phần đoán chữ ё cho từ đồng hình của RUAccent (лет → лёт, села → сёла,
   небо → нёбо) đã bị tắt vì sai cả 16/16 lần. Lỗi riêng của từng truyện (tên riêng, một từ đồng hình trong câu
   lạ) ghi vào `tu_dien.txt`, vd. `Замок был старый = Замо́к был старый`, `re:\bШуман(а|у|ом|е)?\b = Шу́ман\1`.
+- **Bản fine-tune này cần giọng mẫu ngắn.** Với giọng mẫu 13 giây của `ru_female_narrator`, nó im lặng hoặc dừng sau
+  một âm tiết ở cả 18/18 lần đọc 9 câu ngắn (9–57 chữ cái: «— Я помню, Олег.», «Приятного прослушивания.»…), có hay
+  không có dấu trọng âm, mà một truyện có rất nhiều câu như vậy. Với 5,6 giây đầu của chính giọng mẫu đó (cắt ở chỗ
+  nghỉ sau câu đầu) nó đọc đúng 18/18, cùng độ dài như model gốc, và cả 8/8 đoạn dài/trung bình. audiblez tự dùng
+  phần đầu này khi đọc bằng model trọng âm: hai giọng có sẵn đã khai báo sẵn (`"short_reference"` trong
+  `profile.json`). Giọng tự tạo thì thêm vào `profile.json` của nó (thời điểm cắt nằm trong một chỗ nghỉ, sau một
+  câu trọn vẹn, khoảng 5–7 s, và đúng câu đó):
+  ```json
+  "short_reference": {"seconds": 5.58, "text": "Тишина стояла такая, что было слышно, как тикают часы в соседней комнате."}
+  ```
+  Thiếu dòng này thì audiblez cảnh báo khi nạp model. Model gốc (không `--stress`) đọc tốt câu ngắn với giọng mẫu dài
+  (22/22) nên không đổi gì.
 - **Model card cảnh báo**: một phần câu dùng để huấn luyện lấy từ bộ dữ liệu `biggest-ru-book` không khai báo giấy
   phép; tác giả khuyên kiểm tra trước khi dùng thương mại. Trọng số model là Apache-2.0.
 - Hãy nghe so sánh một chương có và không có `--stress ruaccent` trước khi làm cả loạt.

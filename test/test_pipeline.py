@@ -170,10 +170,53 @@ class PipelineTest(unittest.TestCase):
         engine = QwenEngine(mode='clone', language='ru', voice_profile=find_voice_profile('ru_male_narrator'),
                             model=DummyModel(), temperature=0.7)
         self.assertEqual(core.engine_fingerprint(choice, settings), (engine.name, engine.fingerprint()))
+        # the ru-stress fine-tune clones from the short reference of the profile (cut in a pause), the base model
+        # from the whole one; the cache key follows
+        from audiblez.stress_ru import STRESS_MODEL
+        prompts = []
+
+        class RecordingModel(DummyModel):
+            def create_voice_clone_prompt(self, **kwargs):
+                prompts.append(kwargs)
+                return []
+
+        settings = core.Settings(voice_profile='ru_female_narrator', stress='ruaccent')
+        choice = core.resolve_engine_choice(settings, 'ru')
+        settings = core.with_stress_model(settings, choice)
+        self.assertEqual(settings.qwen_model, STRESS_MODEL)
+        profile = find_voice_profile('ru_female_narrator')
+        engine = QwenEngine(mode='clone', language='ru', voice_profile=profile, model_id=STRESS_MODEL,
+                            model=RecordingModel())
+        self.assertEqual(core.engine_fingerprint(choice, settings), (engine.name, engine.fingerprint()))
+        audio, sr = prompts[-1]['ref_audio']
+        self.assertAlmostEqual(len(audio) / sr, 5.58, places=2)
+        self.assertEqual(prompts[-1]['ref_text'], engine.ref_text)
+        self.assertEqual(engine.ref_text, 'Тишина стояла такая, что было слышно, как тикают часы в соседней комнате.')
+        base = QwenEngine(mode='clone', language='ru', voice_profile=profile, model=RecordingModel())
+        self.assertEqual(base.ref_text, profile.text)
+        self.assertAlmostEqual(len(prompts[-1]['ref_audio'][0]) / sr, 13.04, places=1)
+        self.assertNotEqual(base.fingerprint(), engine.fingerprint().replace(STRESS_MODEL, base.model_id))
         settings = core.Settings(speaker='Ono_Anna', instruct='優しく', language='ja')
         choice = core.resolve_engine_choice(settings, 'ja')
         engine = QwenEngine(mode='custom', language='ja', speaker='Ono_Anna', instruct='優しく', model=DummyModel())
         self.assertEqual(core.engine_fingerprint(choice, settings), (engine.name, engine.fingerprint()))
+
+    def test_short_references_are_cut_in_a_pause(self):
+        """The short reference of a bundled narrator ends in the silence after its first sentence."""
+        from audiblez.engines import find_voice_profile, list_bundled_voices, load_reference_audio
+        checked = 0
+        for name in list_bundled_voices():
+            profile = find_voice_profile(name)
+            if profile.short_reference is None:
+                continue
+            seconds, text = profile.short_reference
+            self.assertTrue(profile.text.startswith(text), name)
+            wav, sr = load_reference_audio(profile.audio_path)
+            peak = np.sqrt(np.mean(wav ** 2))
+            around = wav[int((seconds - 0.08) * sr):int((seconds + 0.08) * sr)]
+            self.assertLess(20 * np.log10(np.sqrt(np.mean(around ** 2)) / peak + 1e-9), -35, name)
+            checked += 1
+        self.assertGreaterEqual(checked, 2)
 
     def test_benchmark(self):
         """--benchmark times the configurations of this device and runs the quality checks on every take."""
