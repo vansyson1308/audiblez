@@ -69,6 +69,23 @@ class AudioTest(unittest.TestCase):
         self.assertGreater(out[3], ref + 1.5)  # ...but still louder than the narration
         self.assertGreater(out[4], levels[4])  # quiet chunk raised
 
+    def test_room_tone(self):
+        from audiblez.audio import RoomTone, estimate_noise_floor
+        rng = np.random.default_rng(1)
+        noisy = [np.concatenate([tone(1.0), (10 ** (-66 / 20) * rng.standard_normal(int(0.5 * SR))).astype(np.float32),
+                                 tone(1.0)]) for _ in range(3)]
+        level = estimate_noise_floor(noisy, SR)
+        self.assertAlmostEqual(level, -66.0, delta=2.0)
+        self.assertIsNone(estimate_noise_floor([tone(2.0)], SR))  # no pause to measure: digital silence is kept
+        rt = RoomTone(level, SR, seed=3)
+        gap = rt(0.75)
+        self.assertEqual(len(gap), int(0.75 * SR))
+        rms = 20 * np.log10(np.sqrt(np.mean(gap[SR // 50:-SR // 50] ** 2)))
+        self.assertAlmostEqual(rms, level, delta=2.0)
+        self.assertEqual(gap[0], 0.0)  # faded in: no click
+        self.assertEqual(len(rt(30.0)), 30 * SR)  # longer than the noise buffer
+        self.assertFalse(np.array_equal(rt(0.5), rt(0.5)))  # not the same noise in every pause
+
     def test_cer(self):
         self.assertEqual(char_error_rate('Всё ещё идёт!', 'все еще идет'), 0.0)
         self.assertGreater(char_error_rate('Что ты сделал', 'Кто ты сделал'), 0.0)

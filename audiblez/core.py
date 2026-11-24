@@ -26,7 +26,8 @@ from ebooklib import epub
 from tabulate import tabulate
 
 from audiblez import text as textmod
-from audiblez.audio import QAConfig, analyze_chunk, clean_chunk, level_chunks, silence
+from audiblez.audio import (QAConfig, RoomTone, analyze_chunk, clean_chunk, estimate_noise_floor, level_chunks,
+                            silence)
 from audiblez.normalize import Lexicon, normalize_text
 from audiblez.text import BREAK, HEADING, Section, blocks_to_text, chunk_paragraph, html_to_blocks
 
@@ -82,6 +83,7 @@ class Settings:
     stress: str = 'off'  # off | ruaccent (Russian: automatic stress marks + a model that follows them)
     announce_title: bool = True
     pause_scale: float = 1.0
+    room_tone: bool = True  # pauses filled with the background noise of the voice instead of digital silence
     # output
     formats: tuple = ('m4b',)
     loudness: float = -16.0
@@ -746,16 +748,18 @@ def cache_dir_for(work_dir, engine):
     return Path(work_dir) / 'cache' / f'{engine.name}-{fp_hash}'
 
 
-def assemble_chapter(segments: List[Segment], audios, sr, scale=1.0):
+def assemble_chapter(segments: List[Segment], audios, sr, scale=1.0, room_tone=None):
+    """Chunks and pauses of a chapter; pauses are digital silence, or `room_tone(seconds)` (see audio.RoomTone)."""
+    gap = room_tone or (lambda seconds: silence(seconds, sr))
     lead = PAUSES['chapter_lead'] * scale
-    parts, t, split_points = [silence(lead, sr)], lead, []
+    parts, t, split_points = [gap(lead)], lead, []
     for i, (seg, wav) in enumerate(zip(segments, audios)):
         parts.append(np.asarray(wav, dtype=np.float32))
         t += len(wav) / sr
         pause = seg.pause_after
         if i == len(segments) - 1:
             pause = max(pause, PAUSES['chapter_tail'] * scale)
-        parts.append(silence(pause, sr))
+        parts.append(gap(pause))
         if seg.para_end:
             split_points.append(t + pause / 2)
         t += pause
@@ -950,7 +954,9 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
         if post_event:
             post_event('CORE_CHAPTER_STARTED', chapter_index=c.source_index)
         audios = level_chunks([cache.load(s.text) for s in c.segments], sr)
-        wav, split_points = assemble_chapter(c.segments, audios, sr, settings.pause_scale)
+        tone_db = estimate_noise_floor(audios, sr) if settings.room_tone else None
+        tone = RoomTone(tone_db, sr, seed=c.index) if tone_db is not None else None
+        wav, split_points = assemble_chapter(c.segments, audios, sr, settings.pause_scale, room_tone=tone)
         path = chapters_dir / f'chapter_{c.index:03d}.wav'
         soundfile.write(str(path), wav, sr, subtype='PCM_16')
         chapter_audio.append(ChapterAudio(c.title, path, len(wav) / sr, split_points))

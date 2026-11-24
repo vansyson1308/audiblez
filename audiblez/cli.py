@@ -85,6 +85,9 @@ def build_parser():
     g.add_argument('--max-chunk-chars', type=int, help='Maximum characters per synthesized chunk (default: 300 for '
                                                        'Qwen3-TTS, 400 for Kokoro)')
     g.add_argument('--pause-scale', type=float, default=1.0, help='Multiply all pauses (e.g. 1.2 for a calmer pace)')
+    g.add_argument('--no-room-tone', action='store_true',
+                   help='Digital silence in the pauses (default: the soft background noise of the voice, like a real '
+                        'recording, so that the background does not switch off between sentences)')
 
     g = parser.add_argument_group('quality control')
     g.add_argument('--no-qa', action='store_true', help='Disable automatic checks and retries')
@@ -124,7 +127,8 @@ def settings_from_args(args):
         max_retries=args.max_retries, retry_failed=args.retry_failed, normalize=not args.no_normalize,
         lexicon=args.lexicon, keep_stress=args.keep_stress_marks, stress=args.stress,
         announce_title=not args.no_title,
-        pause_scale=args.pause_scale, formats=formats, loudness=args.loudness, episode_hours=args.episode_hours,
+        pause_scale=args.pause_scale, room_tone=not args.no_room_tone, formats=formats, loudness=args.loudness,
+        episode_hours=args.episode_hours,
         cover=args.cover, keep_master=args.keep_master, dry_run=args.dry_run, chapters=args.chapters)
 
 
