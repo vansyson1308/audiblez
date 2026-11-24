@@ -47,8 +47,8 @@ What happens between the e-book and the audio file matters as much as the voice:
 
 On a Google Colab's T4 GPU via Cuda, **Kokoro takes about 5 minutes to convert "Animal's Farm" by Orwell**
 (about 160,000 characters), at a rate of about 600 characters per second. On an M2 MacBook Pro CPU it takes about
-1 hour. Qwen3-TTS (1.7B parameters) is much heavier: a CUDA GPU is strongly recommended (on a 4-core CPU it runs at
-about 5x slower than real time).
+1 hour. Qwen3-TTS (1.7B parameters) is much heavier: a CUDA GPU is strongly recommended. Measured on a 4-core
+Xeon CPU: voice cloning runs about 8x slower than real time (1 hour of audio takes about 8 hours).
 
 
 ## Russian audiobooks with Qwen3-TTS (quick start)

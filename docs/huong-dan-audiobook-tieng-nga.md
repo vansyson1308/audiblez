@@ -5,7 +5,8 @@ Tài liệu này mô tả quy trình đầy đủ: từ file EPUB tiếng Nga đ
 ## 1. Cài đặt (một lần)
 
 Khuyến nghị: máy có **GPU NVIDIA** (từ 8 GB VRAM, ưu tiên dòng RTX 30xx/40xx trở lên vì hỗ trợ bfloat16).
-Trên CPU vẫn chạy được nhưng chậm: CPU 4 nhân mất khoảng **5 giờ máy cho 1 giờ audio**.
+Trên CPU vẫn chạy được nhưng rất chậm: đo thực tế trên CPU Xeon 4 nhân mất khoảng **8 giờ máy cho 1 giờ audio**
+(tức ~17 giờ cho một tập 2 tiếng). Không có GPU thì có thể thuê GPU theo giờ (Colab, RunPod, Vast.ai…).
 
 ```bash
 sudo apt install ffmpeg sox            # Ubuntu/Debian. Trên Mac: brew install ffmpeg sox
