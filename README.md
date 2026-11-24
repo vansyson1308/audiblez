@@ -80,7 +80,7 @@ clean reference (`reference.flac`) and its exact transcript (`reference.txt`). W
 speakers (`--speaker Ryan`...) speak Russian with a foreign accent, and `--instruct` voice design alone can drift
 between sentences; a cloned reference keeps the same native voice for hours. Only clone voices you have the rights to.
 
-Useful options for long books: `--batch-size 4` (GPU throughput), `--lexicon names.txt` (lines like
+Useful options for long books: `--batch-size 8` (more GPU throughput on large GPUs; default 4 on CUDA), `--lexicon names.txt` (lines like
 `Германн = Герман`), `--temperature 0.7` (steadier, less expressive), `--retry-failed` (regenerate the chunks of the
 QA report), `--loudness -14` (louder masters), `--cover image.jpg` (video/m4b artwork).
 

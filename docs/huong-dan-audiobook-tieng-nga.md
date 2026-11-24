@@ -90,8 +90,10 @@ Nếu thấy giọng quá "kịch" hoặc thỉnh thoảng lạc: `--temperature
 
 ```bash
 audiblez truyen.epub --voice-profile voices/ru_male_narrator/candidate_03 \
-    --youtube --episode-hours 2 --batch-size 4 --lexicon tu_dien.txt
+    --youtube --episode-hours 2 --lexicon tu_dien.txt
 ```
+
+Trên GPU, mặc định xử lý 4 câu cùng lúc (`--batch-size 4`); GPU lớn (24 GB+) có thể thử `--batch-size 8` cho nhanh hơn.
 
 Kết quả trong thư mục hiện tại:
 
