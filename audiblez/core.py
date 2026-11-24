@@ -194,9 +194,11 @@ def find_document_chapters_and_extract_texts(book):
     return document_chapters
 
 
-_NON_CONTENT_RE = re.compile(
-    r'(^|[/_\-.])(nav|toc|contents?|cover|copyright|colophon|titlepage|title|halftitle|about|imprint|'
-    r'index|bibliograph\w*|glossary|footnotes?|endnotes?|notes|acknowledge?ments?|wrap\d*)([/_\-.\d]|$)', re.I)
+_NON_CONTENT_RE = re.compile(  # never the story
+    r'(^|[/_\-.])(nav|toc|contents?|cover|copyright|colophon|titlepage|halftitle|bibliograph\w*|glossary|'
+    r'footnotes?|endnotes?|notes|acknowledge?ments?)([/_\-.\d]|$)', re.I)
+_MAYBE_NON_CONTENT_RE = re.compile(  # usually not the story, unless it is the main (largest) document
+    r'(^|[/_\-.])(title|about|imprint|index|wrap\d*)([/_\-.\d]|$)', re.I)
 
 
 def is_chapter(c):
@@ -212,8 +214,11 @@ def is_chapter(c):
     return has_min_len and title_looks_like_chapter
 
 
-def is_non_content(c):
-    return isinstance(c, epub.EpubNav) or bool(_NON_CONTENT_RE.search(c.get_name()))
+def is_non_content(c, largest=0):
+    if isinstance(c, epub.EpubNav) or _NON_CONTENT_RE.search(c.get_name()):
+        return True
+    size = len(getattr(c, 'extracted_text', ''))
+    return bool(_MAYBE_NON_CONTENT_RE.search(c.get_name())) and (size < 5000 or size < 0.5 * largest)
 
 
 def chapter_beginning_one_liner(c, chars=20):
@@ -225,8 +230,9 @@ def find_good_chapters(document_chapters):
     chapters = [c for c in document_chapters if c.get_type() == ebooklib.ITEM_DOCUMENT and is_chapter(c)]
     if len(chapters) == 0:
         print('Not easy to recognize the chapters, defaulting to all non-empty documents.')
-        chapters = [c for c in document_chapters
-                    if c.get_type() == ebooklib.ITEM_DOCUMENT and len(c.extracted_text) > 10 and not is_non_content(c)]
+        largest = max((len(c.extracted_text) for c in document_chapters), default=0)
+        chapters = [c for c in document_chapters if c.get_type() == ebooklib.ITEM_DOCUMENT
+                    and len(c.extracted_text) > 10 and not is_non_content(c, largest)]
         if not chapters:
             chapters = [c for c in document_chapters if len(c.extracted_text) > 10]
     return chapters

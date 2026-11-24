@@ -128,6 +128,16 @@ class PipelineTest(unittest.TestCase):
         script = (out / 'Тестовая.повесть.audiblez' / 'script.txt').read_text(encoding='utf-8')
         self.assertIn('Глава вторая.', script)
 
+    def test_single_file_book_named_index_is_kept(self):
+        from types import SimpleNamespace
+        import ebooklib
+        docs = []
+        for name, size in [('cover.xhtml', 50), ('index.html', 200000), ('about.xhtml', 900), ('toc.xhtml', 3000)]:
+            d = SimpleNamespace(get_name=lambda n=name: n, get_type=lambda: ebooklib.ITEM_DOCUMENT,
+                                extracted_text='x' * size)
+            docs.append(d)
+        self.assertEqual([d.get_name() for d in core.find_good_chapters(docs)], ['index.html'])
+
     def test_chapter_selection(self):
         res = core.main(self.epub, output_folder=self.tmp / 'out',
                         settings=core.Settings(dry_run=True, chapters='2-3'))
