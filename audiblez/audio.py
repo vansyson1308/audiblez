@@ -363,6 +363,9 @@ def strip_whisper_hallucinations(transcript, reference):
     return re.sub(r'\s{2,}', ' ', transcript).strip()
 
 
+_UNIT_NEXT_TO_DIGIT = re.compile(r'(?<=\d)\s?[%‰₽€$]|[₽€$]\s?(?=\d)')
+
+
 class AsrVerifier:
     """Transcribes synthesized chunks with faster-whisper and measures the character error rate."""
 
@@ -390,16 +393,32 @@ class AsrVerifier:
                                             condition_on_previous_text=False, vad_filter=False)
         return ' '.join(s.text.strip() for s in segments).strip()
 
+    def _heard(self, transcript, text):
+        """
+        The transcript written the way our text is. Whisper writes "в 1812 году" while the text says "в тысяча
+        восемьсот двенадцатом году": both are normalized. It also adds unit symbols: "ниже процентов на пятнадцать"
+        comes back as "ниже процентов на 15%", which would read "…на пятнадцать процентов" and look like a clipped
+        ending. Next to a digit, a unit symbol is therefore read both ways and the reading closer to the text is kept
+        (the text may as well say "пятнадцать процентов").
+        """
+        from audiblez.normalize import normalize_text
+        variants = [transcript]
+        without_units = _UNIT_NEXT_TO_DIGIT.sub('', transcript)
+        if without_units != transcript:
+            variants.append(without_units)
+        readings = []
+        for v in variants:
+            try:
+                readings.append(normalize_text(v, self.language))
+            except Exception:
+                readings.append(v)
+        return min(readings, key=lambda h: char_error_rate(text, h, self.language))
+
     def check(self, wav, sr, text, qa: QAConfig, result: QAResult):
         if count_letters(text) < 20:  # Whisper itself is unreliable on very short clips
             return result
         transcript = strip_whisper_hallucinations(self.transcribe(wav, sr), text)
-        # Whisper writes "в 1812 году" while our text says "в тысяча восемьсот двенадцатом году": normalize both
-        from audiblez.normalize import normalize_text
-        try:
-            heard = normalize_text(transcript, self.language)
-        except Exception:
-            heard = transcript
+        heard = self._heard(transcript, text)
         cer = char_error_rate(text, heard, self.language)
         result.cer, result.transcript = cer, transcript
         max_cer = qa.max_cer + (0.05 if self.language == 'ja' else 0.0)  # kanji/kana variants remain in ja

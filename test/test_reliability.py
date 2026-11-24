@@ -88,6 +88,29 @@ class EmptyTakeTest(unittest.TestCase):
             self.assertTrue(all(f.stat().st_size > 0 for f in flacs))
 
 
+class AsrUnitsTest(unittest.TestCase):
+    def test_unit_symbols_written_by_whisper(self):
+        """Whisper writes "на 15%" for "на пятнадцать": not a clipped ending. A clipped ending is still one."""
+        import numpy as np
+
+        from audiblez.audio import AsrVerifier, QAConfig, QAResult
+        verifier = object.__new__(AsrVerifier)  # no Whisper model: the transcript is given
+        verifier.language = 'ru'
+        text = 'Если мы упустим этого покупателя, следующий появится только весной, а цена будет ниже процентов на ' \
+               'пятнадцать.'
+        cases = [(text, 'Если мы упустим этого покупателя, следующий появится только весной, а цена будет ниже '
+                        'процентов на 15%.'),
+                 ('Цена на дом за год упала на пятнадцать процентов.', 'Цена на дом за год упала на 15%.')]
+        for reference, transcript in cases:
+            verifier.transcribe = lambda wav, sr, t=transcript: t
+            result = verifier.check(np.zeros(24000, np.float32), 24000, reference, QAConfig(), QAResult(ok=True))
+            self.assertTrue(result.ok, result.reasons)
+        verifier.transcribe = lambda wav, sr: ('Если мы упустим этого покупателя, следующий появится только весной, '
+                                               'а цена будет ниже процентов')
+        result = verifier.check(np.zeros(24000, np.float32), 24000, text, QAConfig(), QAResult(ok=True))
+        self.assertFalse(result.ok)
+
+
 class TokenFloorTest(unittest.TestCase):
     def test_short_sentences_get_a_token_floor(self):
         """qwen-tts hard-codes min_new_tokens=2: the engine raises it so a short sentence is not cut after a syllable."""
