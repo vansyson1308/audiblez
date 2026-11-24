@@ -4,39 +4,132 @@ import sys
 
 from audiblez.voices import voices, available_voices_str
 
+EPILOG = '''examples:
+  audiblez book.epub -v af_sky                                   English, Kokoro voice
+  audiblez book_ru.epub --voice-profile ru_male_narrator --youtube --episode-hours 2
+                                                                 Russian, Qwen3-TTS cloned narrator, YouTube videos
+                                                                 of about 2 hours each
+  audiblez book_ru.epub --dry-run                                check the normalized text (script.txt) first
+  audiblez book_ru.epub --chapters 1 --voice-profile voices/narrator/candidate_02
+                                                                 quick test on the first chapter
+  audiblez-voice design --preset ru_male_narrator                create candidate voices to choose from
 
-def cli_main():
-    voices_str = ', '.join(voices)
-    epilog = ('example:\n' +
-              '  audiblez book.epub -l en-us -v af_sky\n\n' +
-              'to run GUI just run:\n'
-              '  audiblez-ui\n\n' +
-              'available voices:\n' +
-              available_voices_str)
-    default_voice = 'af_sky'
-    parser = argparse.ArgumentParser(epilog=epilog, formatter_class=argparse.RawDescriptionHelpFormatter)
+to run GUI just run:
+  audiblez-ui
+
+available Kokoro voices:
+''' + available_voices_str
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(prog='audiblez', epilog=EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter,
+                                     description='Generate audiobooks from e-books (epub to m4b / YouTube mp4).')
     parser.add_argument('epub_file_path', help='Path to the epub file')
-    parser.add_argument('-v', '--voice', default=default_voice, help=f'Choose narrating voice: {voices_str}')
-    parser.add_argument('-p', '--pick', default=False, help=f'Interactively select which chapters to read in the audiobook', action='store_true')
-    parser.add_argument('-s', '--speed', default=1.0, help=f'Set speed from 0.5 to 2.0', type=float)
-    parser.add_argument('-c', '--cuda', default=False, help=f'Use GPU via Cuda in Torch if available', action='store_true')
-    parser.add_argument('-o', '--output', default='.', help='Output folder for the audiobook and temporary files', metavar='FOLDER')
+    parser.add_argument('-o', '--output', default='.', help='Output folder for the audiobook and temporary files',
+                        metavar='FOLDER')
+    parser.add_argument('-p', '--pick', default=False, action='store_true',
+                        help='Interactively select which chapters to read in the audiobook')
+    parser.add_argument('--chapters', metavar='LIST', help='Only these audiobook chapters, e.g. "1-3,5" (see the table)')
+    parser.add_argument('--dry-run', action='store_true', help='Only extract and normalize the text (script.txt)')
 
-    if len(sys.argv) == 1:
+    g = parser.add_argument_group('voice and engine')
+    g.add_argument('--engine', choices=['auto', 'kokoro', 'qwen'], default='auto',
+                   help='TTS engine (default: Kokoro for its languages, Qwen3-TTS otherwise, e.g. Russian)')
+    g.add_argument('-v', '--voice', default=None, help=f'Kokoro voice: {", ".join(voices)} (see list below)')
+    g.add_argument('-l', '--language', default=None, help='Language code (ru, en, de...). Default: from the e-book')
+    g.add_argument('-s', '--speed', default=1.0, type=float, help='Speed from 0.5 to 2.0 (default 1.0)')
+    g.add_argument('--voice-profile', metavar='DIR|NAME',
+                   help='Qwen3-TTS cloned voice: folder made by audiblez-voice, or a bundled voice (ru_male_narrator)')
+    g.add_argument('--ref-audio', metavar='WAV', help='Qwen3-TTS: clone this recording (6-15 s of clean speech)')
+    g.add_argument('--ref-text', metavar='TEXT', help='Exact transcript of --ref-audio (or @file.txt)')
+    g.add_argument('--speaker', help='Qwen3-TTS built-in speaker (Vivian, Serena, Uncle_Fu, Dylan, Eric, Ryan, Aiden, '
+                                    'Ono_Anna, Sohee). They have an accent outside their native language')
+    g.add_argument('--instruct', help='Qwen3-TTS style instruction (with --speaker on 1.7B) or voice description '
+                                      '(voice design; the voice can drift between sentences: prefer audiblez-voice)')
+    g.add_argument('--qwen-mode', choices=['clone', 'custom', 'design'], help='Force the Qwen3-TTS mode')
+    g.add_argument('--qwen-model', help='Qwen3-TTS model id or local folder (default: the 1.7B model for the mode)')
+    g.add_argument('--x-vector-only', action='store_true',
+                   help='Clone from the speaker embedding only (no transcript needed, lower similarity)')
+    g.add_argument('-c', '--cuda', default=False, action='store_true', help='Use GPU via CUDA (same as --device cuda)')
+    g.add_argument('--device', default='auto', help='auto (default), cuda, mps or cpu')
+    g.add_argument('--dtype', default='auto', help='auto (default), bfloat16, float16, float32')
+    g.add_argument('--batch-size', type=int, default=1, help='Chunks synthesized together (GPU: 4-8 is faster)')
+    g.add_argument('--temperature', type=float, help='Qwen3-TTS sampling temperature (default 0.9; lower = steadier)')
+    g.add_argument('--top-p', type=float)
+    g.add_argument('--top-k', type=int)
+    g.add_argument('--repetition-penalty', type=float)
+    g.add_argument('--seed', type=int, default=0, help='Base random seed (results are reproducible)')
+
+    g = parser.add_argument_group('text')
+    g.add_argument('--lexicon', metavar='FILE', help='Pronunciation dictionary: lines "word = replacement"')
+    g.add_argument('--no-normalize', action='store_true', help='Do not normalize numbers/abbreviations/ё')
+    g.add_argument('--keep-stress-marks', action='store_true', help='Keep combining stress marks (U+0301)')
+    g.add_argument('--no-title', action='store_true', help='Do not read the book title and author at the start')
+    g.add_argument('--max-chunk-chars', type=int, help='Maximum characters per synthesized chunk (default: 300 for '
+                                                       'Qwen3-TTS, 400 for Kokoro)')
+    g.add_argument('--pause-scale', type=float, default=1.0, help='Multiply all pauses (e.g. 1.2 for a calmer pace)')
+
+    g = parser.add_argument_group('quality control')
+    g.add_argument('--no-qa', action='store_true', help='Disable automatic checks and retries')
+    g.add_argument('--asr', choices=['auto', 'on', 'off'], default='auto',
+                   help='Check every chunk with Whisper and regenerate mismatches (auto: if faster-whisper is installed)')
+    g.add_argument('--asr-model', help='Whisper model (default: large-v3-turbo on GPU, small on CPU)')
+    g.add_argument('--max-retries', type=int, default=3, help='Regenerations of a chunk that fails the checks')
+    g.add_argument('--retry-failed', action='store_true', help='Regenerate the chunks listed in the QA report')
+
+    g = parser.add_argument_group('output')
+    g.add_argument('--youtube', action='store_true', help='Also create an .mp4 video (cover image) and chapter '
+                                                          'timestamps for the YouTube description')
+    g.add_argument('--formats', default=None, help='Comma separated: m4b, mp4, wav (default m4b; m4b,mp4 with --youtube)')
+    g.add_argument('--episode-hours', type=float, help='Split the output in parts of about this many hours, e.g. 2')
+    g.add_argument('--loudness', type=float, default=-16.0, help='Target loudness in LUFS (default -16)')
+    g.add_argument('--cover', metavar='IMAGE', help='Cover image for the m4b and the video (default: from the e-book)')
+    g.add_argument('--keep-master', action='store_true', help='Keep the mastered WAV file(s)')
+    return parser
+
+
+def settings_from_args(args):
+    from audiblez.core import Settings
+    formats = args.formats.split(',') if args.formats else (['m4b', 'mp4'] if args.youtube else ['m4b'])
+    formats = tuple(f.strip().lower() for f in formats if f.strip())
+    bad = [f for f in formats if f not in ('m4b', 'mp4', 'wav')]
+    if bad:
+        sys.exit(f'Unknown output format(s): {", ".join(bad)}')
+    device = 'cuda' if args.cuda else args.device
+    return Settings(
+        engine=args.engine, voice=args.voice, language=args.language, speed=args.speed, device=device,
+        dtype=args.dtype, qwen_mode=args.qwen_mode, qwen_model=args.qwen_model, voice_profile=args.voice_profile,
+        ref_audio=args.ref_audio, ref_text=args.ref_text, speaker=args.speaker, instruct=args.instruct,
+        x_vector_only=args.x_vector_only, temperature=args.temperature, top_p=args.top_p, top_k=args.top_k,
+        repetition_penalty=args.repetition_penalty, seed=args.seed, batch_size=args.batch_size,
+        max_chunk_chars=args.max_chunk_chars, qa=not args.no_qa, asr=args.asr, asr_model=args.asr_model,
+        max_retries=args.max_retries, retry_failed=args.retry_failed, normalize=not args.no_normalize,
+        lexicon=args.lexicon, keep_stress=args.keep_stress_marks, announce_title=not args.no_title,
+        pause_scale=args.pause_scale, formats=formats, loudness=args.loudness, episode_hours=args.episode_hours,
+        cover=args.cover, keep_master=args.keep_master, dry_run=args.dry_run, chapters=args.chapters)
+
+
+def cli_main(argv=None):
+    parser = build_parser()
+    argv = sys.argv[1:] if argv is None else argv
+    if len(argv) == 0:
         parser.print_help(sys.stderr)
         sys.exit(1)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    if not 0.5 <= args.speed <= 2.0:
+        parser.error('--speed must be between 0.5 and 2.0')
+    settings = settings_from_args(args)
 
-    if args.cuda:
-        import torch.cuda
+    if settings.device in ('cuda', 'auto') and not settings.dry_run:
+        import torch
         if torch.cuda.is_available():
-            print('CUDA GPU available')
-            torch.set_default_device('cuda')
-        else:
+            print('CUDA GPU available:', torch.cuda.get_device_name(0))
+        elif settings.device == 'cuda':
             print('CUDA GPU not available. Defaulting to CPU')
+            settings.device = 'cpu'
 
-    from core import main
-    main(args.epub_file_path, args.voice, args.pick, args.speed, args.output)
+    from audiblez.core import main
+    main(args.epub_file_path, args.voice, args.pick, args.speed, args.output, settings=settings)
 
 
 if __name__ == '__main__':

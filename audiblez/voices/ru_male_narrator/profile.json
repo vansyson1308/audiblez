@@ -1,0 +1,11 @@
+{
+  "source": "qwen3-tts voice design",
+  "instruct": "A deep, warm baritone male voice, about 45 years old, native Russian speaker. Professional audiobook narrator: calm, expressive and natural intonation, clear diction, moderate pace, no foreign accent.",
+  "seed": 1,
+  "audio": "reference.flac",
+  "text": "Тишина стояла такая, что было слышно, как тикают часы в соседней комнате. — Ты правда думаешь, что он вернётся? — спросила она едва слышно. Я ничего не ответил: за окном уже светало.",
+  "language": "ru",
+  "duration": 16.48,
+  "name": "ru_male_narrator",
+  "license": "Generated with Qwen3-TTS-12Hz-1.7B-VoiceDesign (Apache-2.0); synthetic voice, not a real person"
+}

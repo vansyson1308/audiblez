@@ -22,8 +22,10 @@ jobs:
         run: audiblez Fundamental-Accessibility-Tests-Basic-Functionality-v2.0.0.epub
       - name: check m4b output file
         run: ls -lah Fundamental-Accessibility-Tests-Basic-Functionality-v2.0.0.m4b
-  #      - name: run unit-tests (unittest classes in /test)
-  #        run:  poetry run python -m unittest discover test
+      - name: run unit tests (no model download needed)
+        run: |
+          pip install pytest
+          python -m pytest -q test/test_text.py test/test_normalize_ru.py test/test_audio_export.py test/test_pipeline.py
   windows-git-clone-and-run:
     runs-on: windows-latest
     steps:

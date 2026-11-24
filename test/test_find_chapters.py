@@ -176,6 +176,6 @@ class FindChaptersTest(unittest.TestCase):
             '2903486949112998543_345-h-29.htm.xhtml',  # 40006
             '2903486949112998543_345-h-30.htm.xhtml',  # 4081
             '2903486949112998543_345-h-31.htm.xhtml',  # 19692
-            'toc.xhtml',  # 4900
+            # 'toc.xhtml',  # 4900: tables of contents are not read anymore
             # 'wrap0000.xhtml',  # 374
         ])

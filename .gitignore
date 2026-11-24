@@ -12,3 +12,6 @@ chapters.txt
 *.onnx
 dist
 .venv
+*.m4b
+*.audiblez/
+!audiblez/voices/*/profile.json
