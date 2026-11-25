@@ -105,8 +105,9 @@ khi mỗi câu có một từ đồng hình. Lưu ý:
 
 - RUAccent vẫn sai khoảng 2–3% số từ (số của tác giả model): sửa bằng `--lexicon` khi nghe thấy. Trên truyện đầu
   tiên (707 từ đồng hình) em đã rà tay từng từ: những lỗi lặp lại (по́няла → поняла́, у двери́ → у две́ри, руки́ →
-  ру́ки, по-моему́, và «не» bị đặt trọng âm 58/312 lần như не́ смогла́ → не смогла́, chỉ giữ не́ был/не́ было…) được
-  audiblez tự sửa; phần đoán chữ ё cho từ đồng hình của RUAccent (лет → лёт, села → сёла,
+  ру́ки, по-моему́, và «не» bị đặt trọng âm 58/312 lần như не́ смогла́ → не смогла́, chỉ giữ не́ был/не́ было; giới từ
+  bị đặt trọng âm ~70 lần mỗi truyện như на́ меня́, за́ окно́м → на меня́, chỉ giữ cụm cố định на́ пол, за́ руку, бе́з
+  вести…) được audiblez tự sửa; phần đoán chữ ё cho từ đồng hình của RUAccent (лет → лёт, села → сёла,
   небо → нёбо) đã bị tắt vì sai cả 16/16 lần. Lỗi riêng của từng truyện (tên riêng, một từ đồng hình trong câu
   lạ) ghi vào `tu_dien.txt`, vd. `Замок был старый = Замо́к был старый`, `re:\bШуман(а|у|ом|е)?\b = Шу́ман\1`.
 - **Bản fine-tune này cần giọng mẫu ngắn.** Với giọng mẫu 13 giây của `ru_female_narrator`, nó im lặng hoặc dừng sau
@@ -190,6 +191,10 @@ audiblez truyen.txt --voice-profile ru_female_narrator --youtube --lexicon tu_di
   để làm tiếp.
 - Truyện rất dài: `--episode-hours 2` chia thành các tập ~2 giờ (cắt ở ranh giới chương/đoạn).
 - Nhịp chậm rãi hơn: `--pause-scale 1.2` hoặc `--speed 0.95`. Giọng quá "kịch" hoặc thỉnh thoảng lạc: `--temperature 0.7`.
+- **Không có GPU** (render trên CPU, đo trên 4 nhân có AMX, 16 GB RAM): thêm `--device cpu --dtype bfloat16
+  --batch-size 4`. bf16 + 4 câu một lượt nhanh gấp ~3 lần mặc định (fp32, từng câu); 8 câu một lượt hết RAM với
+  các đoạn dài nhất. Cả kiểm tra Whisper, truyện 1,8 giờ mất khoảng 7–8 giờ (0,27× thời gian thực), nên GPU
+  Kaggle (~2 giờ) vẫn là cách nhanh nhất. Mọi câu xong đều được lưu cache: dừng giữa chừng thì chạy lại cùng lệnh.
 
 Kết quả:
 
