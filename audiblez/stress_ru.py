@@ -22,7 +22,7 @@ ACUTE = '́'
 GRAVE = '̀'
 VOWELS = 'аеёиоуыэюяАЕЁИОУЫЭЮЯ'
 RUACCENT_OPTIONS = dict(omograph_model_size='turbo3.1', use_dictionary=True)
-CACHE_VERSION = '4'  # bump when the output changes (corrections, ё handling...)
+CACHE_VERSION = '5'  # bump when the output changes (corrections, ё handling...)
 
 _WORD_RE = re.compile(rf'[А-ЯЁа-яё+{ACUTE}]+')
 
@@ -82,6 +82,7 @@ def restore_case(original, processed):
 NORMATIVE = {  # past-tense forms with a single standard stress
     'поняла': 'понял+а', 'подняла': 'поднял+а', 'приняла': 'принял+а', 'принялась': 'принял+ась',
     'начался': 'началс+я', 'началась': 'начал+ась', 'отняла': 'отнял+а', 'заняла': 'занял+а', 'наняла': 'нанял+а',
+    'обняла': 'обнял+а',
     'по-моему': 'по-м+оему', 'по-твоему': 'по-тв+оему',
 }
 # homographs decided by the preposition before them: {word: (stress after these prepositions, stress otherwise)}
@@ -99,6 +100,21 @@ BY_PREPOSITION = {
 NE_STRESSED_BEFORE = {'был', 'было', 'были', 'дал', 'дало', 'дали', 'жил', 'жило', 'жили'}
 _NE_PREPOSITIONS = {'за', 'о', 'об', 'с', 'со', 'к', 'ко', 'на', 'у', 'от', 'для', 'при', 'про', 'по', 'в', 'во', 'из'}
 _NE_PRONOUNS = {'что', 'чем', 'чего', 'чему', 'чём', 'кого', 'кем', 'кому', 'ком'}
+# A preposition is stressed only in fixed phrases, where the noun then loses its stress (на́ пол, за́ город, по́д гору,
+# бе́з вести). RUAccent stressed about 70 prepositions in each of the first two stories, nearly always wrongly
+# (на́ меня́ ×6, за́ окно́м, на́ секу́нду, по́ купе́, и́з Му́рманска), and the stress model then stresses the preposition.
+PREPOSITION_SHIFT = {
+    'на': {'пол', 'нос', 'ночь', 'зиму', 'берег', 'гору', 'спину', 'голову', 'воду', 'ногу', 'руку', 'душу', 'смех',
+           'бок', 'угол', 'ухо'},
+    'за': {'город', 'руку', 'руки', 'ногу', 'ноги', 'голову', 'спину', 'ухо', 'уши', 'нос', 'угол', 'борт', 'душу'},
+    'по': {'полу', 'полю', 'лесу', 'морю', 'носу', 'двое', 'трое'},
+    'под': {'гору', 'ноги', 'руку', 'руки', 'нос'},
+    'из': {'дому', 'лесу', 'виду', 'носу'},
+    'без': {'вести', 'толку'},
+    'от': {'роду'},
+    'до': {'дому', 'смерти'},
+}
+_PREPOSITIONS = set(PREPOSITION_SHIFT) | {'над', 'про', 'об', 'во', 'со', 'ко', 'при', 'у', 'в', 'с', 'к', 'о'}
 _TOKEN_RE = re.compile(r'[А-ЯЁа-яё+]+(?:-[А-ЯЁа-яё+]+)*')
 
 
@@ -127,9 +143,17 @@ def apply_corrections(src, stressed):
     words = [m.group(0) for m in matches]
     bares = [w.replace('+', '').lower() for w in words]
     for k, orig in enumerate(src_words):
+        bare, prev = bares[k], bares[k - 1] if k else ''
+        if bare in _PREPOSITIONS and '+' in words[k]:
+            nxt = bares[k + 1] if k + 1 < len(words) else ''
+            if '+' in orig or nxt in PREPOSITION_SHIFT.get(bare, ()):  # the stress moved to the preposition
+                if nxt and '+' not in src_words[k + 1]:
+                    words[k + 1] = words[k + 1].replace('+', '')  # на́ пол, not на́ по́л
+            else:
+                words[k] = words[k].replace('+', '')
+            continue
         if '+' in orig:
             continue
-        bare, prev = bares[k], bares[k - 1] if k else ''
         if bare in NORMATIVE:
             words[k] = _with_case(NORMATIVE[bare], words[k])
         elif bare in BY_PREPOSITION:

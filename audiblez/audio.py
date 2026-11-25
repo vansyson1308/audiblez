@@ -319,12 +319,30 @@ def _normalize_for_cer(text, lang='en'):
 
 
 def ending_is_missing(reference, hypothesis, lang='en'):
-    """True if the last syllables of the text are not heard at the end of the transcript (clipped ending)."""
+    """
+    True if the last syllables of the text are not heard at the end of the transcript (clipped ending).
+
+    Whisper writes a word the way it was pronounced, and Russian reduces unstressed vowels: «зя́бко» comes back as
+    «зябка», «каждый второй знакомый» as «каждой второй знакомой», «с плаща́» as «с площадь», «голла́ндки» as
+    «Галантки», «за покос травы» as «запак островы». In a 1.8-hour story these were 5 of the 6 "missing endings", each
+    regenerated three times for nothing. So for alphabetic languages the last three words of the text (letters only)
+    may also match the end of the transcript with up to 30% of the letters different. A clipped take misses whole
+    words or a sentence («…кому и сколько.» for «…кому и сколько нужно отдать за покос травы.») and stays far above.
+    """
     lang = (lang or 'en')[:2]
     ref, hyp = _normalize_for_cer(reference, lang), _normalize_for_cer(hypothesis, lang)
     n = 2 if lang in ('ja', 'zh', 'ko') else 3
     tail = ref[-n:]
-    return bool(tail) and len(ref) >= 8 and tail not in hyp[-(n + 4):]
+    if not tail or len(ref) < 8 or tail in hyp[-(n + 4):]:
+        return False
+    if lang in ('ja', 'zh', 'ko'):
+        return True
+    last = ''.join(ref.split()[-3:])
+    heard = hyp.replace(' ', '')
+    if len(last) < 6 or not heard:
+        return True
+    best = min(levenshtein(last, heard[-k:]) for k in range(max(1, len(last) - 3), len(last) + 4))
+    return best > 0.3 * len(last)
 
 
 def levenshtein(a, b):

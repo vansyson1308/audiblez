@@ -111,6 +111,39 @@ class AsrUnitsTest(unittest.TestCase):
         self.assertFalse(result.ok)
 
 
+class EndingCheckTest(unittest.TestCase):
+    """Real transcripts of the first story's render (Whisper small) and what they mean."""
+    REDUCED = [  # the ending is there, written as pronounced or misspelled: not a clipped take
+        ('Синий венчик огня задрожал, и от него сразу стало чуть менее зя́бко.',
+         'Синий венчик огня задрожал, и от него сразу стала чуть менее зябка.'),
+        ('Город у нас маленький, на набережной каждый второй знако́мый.',
+         'город у нас маленький, на набердной каждой второй знакомой.'),
+        ('принесла в дом и опустилась на колени перед чугунной дверцей голла́ндки.',
+         'принесла в дом и опустилась на колени перед чугунной дверцей Галантки.'),
+        ('и ты войдёшь на крыльцо, стряхивая воду с плаща́».',
+         'и ты войдёшь на крыльцо, стряхивая воду с площадь.'),
+        ('и сама диктовала, кому и сколько нужно отдать за покос травы.',
+         'и сама диктовала, кому и сколько нужно отдать запак островы.'),
+    ]
+    CLIPPED = [  # the model stopped before the end
+        ('Даже в последние месяцы она сама диктовала, кому и сколько нужно отдать за покос травы.',
+         'Даже в последние месяцы она сама диктовала, кому и сколько.'),
+        ('Принимать какую-то новую партию речных судов, я в железяках не разбираюсь. Командировка на четыре месяца.',
+         'Принимать какую-то новую партию речных судов, я в железяках не разбираюсь.'),
+        ('Она поставила чайник на плиту и долго смотрела в окно на тёмную реку.',
+         'Она поставила чайник на плиту и долго смотрела в окно.'),
+    ]
+
+    def test_reduced_endings_are_heard_and_clipped_ones_are_not(self):
+        from audiblez.audio import ending_is_missing
+        for text, heard in self.REDUCED:
+            self.assertFalse(ending_is_missing(text, heard, 'ru'), heard)
+        for text, heard in self.CLIPPED:
+            self.assertTrue(ending_is_missing(text, heard, 'ru'), heard)
+        self.assertFalse(ending_is_missing('Он ушёл домой.', 'Он ушёл домой.', 'ru'))
+        self.assertTrue(ending_is_missing('彼は帰ってこなかった。雨が降り始めた。', '彼は帰ってこなかった。', 'ja'))  # unchanged
+
+
 class WhisperCreditsTest(unittest.TestCase):
     def test_subtitle_credits_are_not_speech(self):
         from audiblez.audio import strip_whisper_hallucinations

@@ -76,6 +76,23 @@ class StressHelpersTest(unittest.TestCase):
                          'ПОНЯЛА́, Гу́бы')  # a mark that was already in the text (lexicon) is kept
         self.assertEqual(apply_corrections('один два', 'од+ин'), 'од+ин')  # words do not line up: unchanged
 
+    def test_stress_on_prepositions(self):
+        """Only fixed phrases stress the preposition (на́ пол, бе́з вести); the noun then has no stress of its own."""
+        from audiblez.stress_ru import apply_corrections
+        cases = [
+            ('он посмотрел на меня', '+он посмотр+ел н+а мен+я', 'о́н посмотре́л на меня́'),
+            ('За окном шёл снег', 'З+а окн+ом шёл сн+ег', 'За окно́м шёл сне́г'),
+            ('приехал из Мурманска', 'при+ехал +из М+урманска', 'прие́хал из Му́рманска'),
+            ('по купе поплыл запах', 'п+о куп+е попл+ыл з+апах', 'по купе́ поплы́л за́пах'),
+            ('упал на пол', 'уп+ал н+а п+ол', 'упа́л на́ пол'),
+            ('пропал без вести', 'проп+ал б+ез в+ести', 'пропа́л бе́з вести'),
+            ('взял за руку', 'вз+ял з+а р+уку', 'взя́л за́ руку'),
+            ('с ног+и н+а ногу', 'с ног+и н+а ног+у', 'с ноги́ на́ ногу'),  # stressed in the lexicon: the noun loses it
+        ]
+        for src, ruaccent, expected in cases:
+            self.assertEqual(plus_to_acute(apply_corrections(src, ruaccent)), expected, src)
+        self.assertEqual(plus_to_acute(apply_corrections('она обняла его', 'он+а +обняла ег+о')), 'она́ обняла́ его́')
+
     def test_stress_on_ne(self):
         """«не» is stressed only before был/было/дали/жил... (which lose their stress) and in «не́ за что»."""
         from audiblez.stress_ru import apply_corrections
