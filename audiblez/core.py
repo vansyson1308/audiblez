@@ -4,6 +4,7 @@
 # Kokoro-82M and Qwen3-TTS models for high-quality text-to-speech synthesis.
 # by Claudio Santini 2025 - https://claudio.uk
 import dataclasses
+import gc
 import hashlib
 import importlib
 import json
@@ -552,6 +553,22 @@ def append_failed(path, entry):
         f.write(json.dumps(dict(entry, t=round(time.time(), 3)), ensure_ascii=False) + '\n')
 
 
+def is_out_of_memory(error):
+    """CUDA / CPU allocation failure (a batch of long chunks can need several GB more than one chunk)."""
+    msg = str(error).lower()
+    return isinstance(error, MemoryError) or 'out of memory' in msg or "can't allocate memory" in msg
+
+
+def free_accelerator_memory():
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
 def time_is_up(settings):
     return bool(settings.deadline) and time.time() >= settings.deadline
 
@@ -607,6 +624,7 @@ class Synthesizer:
     def __init__(self, engine, work_dir: Path, settings: Settings, stats=None, verifier=None, post_event=None,
                  language=None, log=print, progress=True):
         self.engine = engine
+        self.max_batch = None  # set after an out-of-memory error
         self.show_progress = progress
         self.settings = settings
         self.stats = stats or new_stats(0)
@@ -662,10 +680,13 @@ class Synthesizer:
         bs = self.batch_size
         if bs > 1:  # similar lengths in a batch: short chunks do not wait for long ones
             todo.sort(key=len, reverse=True)
-        for start in range(0, len(todo), bs):
+        start = 0
+        while start < len(todo):
             if time_is_up(self.settings):
                 return False
-            self._render_batch(todo[start:start + bs], label)
+            size = min(bs, self.max_batch or bs)  # smaller after an out-of-memory error
+            self._render_batch(todo[start:start + size], label)
+            start += size
         return True
 
     def render(self, segments: List[Segment], label=''):
@@ -689,6 +710,19 @@ class Synthesizer:
             try:
                 raw = self.engine.synthesize(batch_texts, seed=seed)
             except Exception as e:
+                if is_out_of_memory(e) and len(pending) > 1:
+                    # Split the batch, and keep the smaller size for the rest of the run
+                    free_accelerator_memory()
+                    half = (len(pending) + 1) // 2
+                    self.max_batch = min(self.max_batch or half, half)
+                    self.log(f'\033[93mOut of memory with {len(pending)} chunks at once: continuing with batches of '
+                             f'{half}.\033[0m')
+                    parts, pending = [pending[:half], pending[half:]], []
+                    for part in parts:
+                        for k in part:
+                            best.pop(k, None)
+                        self._render_batch([texts[k] for k in part], label)
+                    break
                 if attempt >= self.qa_cfg.max_retries:
                     raise
                 self.log(f'\033[93mSynthesis error ({e}), retrying...\033[0m')

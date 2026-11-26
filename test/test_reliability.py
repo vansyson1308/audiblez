@@ -88,6 +88,29 @@ class EmptyTakeTest(unittest.TestCase):
             self.assertTrue(all(f.stat().st_size > 0 for f in flacs))
 
 
+class OutOfMemoryTest(unittest.TestCase):
+    def test_batch_is_split_after_out_of_memory(self):
+        """A GPU that cannot hold a batch of long chunks: the batch is split, and later batches stay smaller."""
+        from fake_engine import FakeEngine
+
+        class SmallGpuEngine(FakeEngine):
+            def synthesize(self, texts, seed=0):
+                if len(texts) > 2:
+                    raise RuntimeError('CUDA out of memory. Tried to allocate 2.00 GiB')
+                return super().synthesize(texts, seed)
+
+        with tempfile.TemporaryDirectory() as d:
+            engine = SmallGpuEngine('ru')
+            settings = core.Settings(asr='off', batch_size=4)
+            synth = core.Synthesizer(engine, Path(d), settings, language='ru', log=lambda m: None, progress=False)
+            texts = [f'Предложение номер {n}, вполне обычное и спокойное.' for n in range(1, 10)]
+            self.assertTrue(synth.synthesize(texts))
+            self.assertTrue(all(synth.is_cached(t) for t in texts))
+            self.assertEqual(synth.max_batch, 2)
+            self.assertTrue(all(len(call) <= 2 for call in engine.calls))
+            self.assertEqual(sorted(t for call in engine.calls for t in call), sorted(texts))  # each text once
+
+
 class AsrUnitsTest(unittest.TestCase):
     def test_unit_symbols_written_by_whisper(self):
         """Whisper writes "на 15%" for "на пятнадцать": not a clipped ending. A clipped ending is still one."""
