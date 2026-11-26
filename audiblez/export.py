@@ -320,14 +320,55 @@ def encode_m4b(master_wav, out_path, meta_path, cover: Optional[Path], opts: Out
     _run(cmd)
 
 
+def image_size(path):
+    """(width, height) of an image, or None."""
+    try:
+        proc = _run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height',
+                     '-of', 'csv=p=0:s=x', path], capture=True)
+        w, h = proc.stdout.strip().splitlines()[0].split('x')[:2]
+        return int(w), int(h)
+    except Exception:
+        return None
+
+
+def cjk_font_file(text):
+    """A font file that can draw this text when it is Japanese, Chinese or Korean (ffmpeg's default font has no
+    CJK glyphs: the title card would show empty boxes), or None."""
+    if re.search(r'[\u3040-\u30ff]', text or ''):
+        lang = 'ja'
+    elif re.search(r'[\uac00-\ud7af]', text or ''):
+        lang = 'ko'
+    elif re.search(r'[\u4e00-\u9fff]', text or ''):
+        lang = 'zh'
+    else:
+        return None
+    if not shutil.which('fc-list'):
+        return None
+    proc = subprocess.run(['fc-list', f':lang={lang}', 'file', 'family'], capture_output=True, text=True,
+                          encoding='utf-8', errors='replace')
+    fonts = [line.split(':', 1) for line in proc.stdout.splitlines() if ':' in line]
+    preferred = ['Noto Sans CJK', 'Source Han Sans', 'Noto Serif CJK', 'IPAexGothic', 'IPAGothic', 'Hiragino',
+                 'Yu Gothic', 'Nanum', 'Malgun', 'WenQuanYi']
+    for name in preferred:  # a typeface designed for the language rather than fontconfig's first match
+        for file, family in fonts:
+            if name in family and Path(file.strip()).is_file():
+                return file.strip()
+    return fonts[0][0].strip() if fonts and Path(fonts[0][0].strip()).is_file() else None
+
+
 def make_video_background(cover: Optional[Path], title, author, work_dir) -> Path:
-    """1920x1080 still image: the cover over a blurred copy of itself, or a dark title card."""
+    """1920x1080 still image: a 16:9 cover full frame, any other cover over a blurred copy of itself, or a dark
+    title card."""
     work_dir = Path(work_dir)
     out = work_dir / 'video_background.png'
     if cover:
-        graph = ('[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,boxblur=40:4,'
-                 'eq=brightness=-0.12[bg];[0:v]scale=1840:1000:force_original_aspect_ratio=decrease[fg];'
-                 '[bg][fg]overlay=(W-w)/2:(H-h)/2,format=rgb24')
+        size = image_size(cover)
+        if size and size[0] >= 1280 and abs(size[0] / size[1] - 16 / 9) < 0.02:  # made for video: use it as is
+            graph = '[0:v]scale=1920:1080:flags=lanczos,format=rgb24'
+        else:
+            graph = ('[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,boxblur=40:4,'
+                     'eq=brightness=-0.12[bg];[0:v]scale=1840:1000:force_original_aspect_ratio=decrease[fg];'
+                     '[bg][fg]overlay=(W-w)/2:(H-h)/2,format=rgb24')
         try:
             _run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-i', cover, '-filter_complex', graph,
                   '-frames:v', '1', out], capture=True)
@@ -336,8 +377,11 @@ def make_video_background(cover: Optional[Path], title, author, work_dir) -> Pat
             pass
     (work_dir / 'title.txt').write_text(title or '', encoding='utf-8')
     (work_dir / 'author.txt').write_text(author or '', encoding='utf-8')
-    text_graph = ("drawtext=textfile=title.txt:fontcolor=white:fontsize=72:x=(w-text_w)/2:y=(h-text_h)/2-60,"
-                  "drawtext=textfile=author.txt:fontcolor=0xbbbbbb:fontsize=48:x=(w-text_w)/2:y=(h-text_h)/2+60")
+    font = cjk_font_file(f'{title} {author}')
+    ff = f"fontfile='{font.replace(chr(92), '/').replace(':', chr(92) + ':')}':" if font else ''
+    text_graph = (f"drawtext={ff}textfile=title.txt:fontcolor=white:fontsize=72:x=(w-text_w)/2:y=(h-text_h)/2-60,"
+                  f"drawtext={ff}textfile=author.txt:fontcolor=0xbbbbbb:fontsize=48:x=(w-text_w)/2:"
+                  "y=(h-text_h)/2+60")
     for vf in (text_graph, None):
         cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i',
                'color=c=0x15171c:s=1920x1080:r=1', '-frames:v', '1']

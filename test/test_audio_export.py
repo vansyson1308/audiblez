@@ -139,6 +139,26 @@ class EpisodesTest(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'ffmpeg not installed')
 class ExportTest(unittest.TestCase):
+    def test_video_background(self):
+        """A 16:9 cover fills the frame; other covers are shown whole over a darkened, blurred copy."""
+        from audiblez.export import make_video_background
+
+        def corner_pixel(png):
+            raw = subprocess.run(['ffmpeg', '-loglevel', 'error', '-i', str(png), '-vf', 'crop=1:1:5:5', '-f',
+                                  'rawvideo', '-pix_fmt', 'rgb24', '-'], capture_output=True, check=True).stdout
+            return tuple(raw[:3])
+
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            for name, size in (('wide', '1280x720'), ('square', '600x600')):
+                subprocess.run(['ffmpeg', '-loglevel', 'error', '-f', 'lavfi', '-i', f'color=c=0xc8c8c8:s={size}',
+                                '-frames:v', '1', str(d / f'{name}.png')], check=True)
+                (d / name).mkdir()
+            wide = corner_pixel(make_video_background(d / 'wide.png', 'T', 'A', d / 'wide'))
+            square = corner_pixel(make_video_background(d / 'square.png', 'T', 'A', d / 'square'))
+            self.assertTrue(all(abs(c - 200) <= 3 for c in wide), wide)  # full frame, unchanged
+            self.assertTrue(all(c < 190 for c in square), square)  # darkened blurred border
+
     def test_export_m4b_mp4_episodes(self):
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
