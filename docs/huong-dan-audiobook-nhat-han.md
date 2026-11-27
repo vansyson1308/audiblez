@@ -158,6 +158,32 @@ kaggle kernels push -p kaggle --accelerator NvidiaTeslaT4
   `--retry-failed` tạo lại các câu trong báo cáo mà không cần sửa gì.
 - Giọng quá "kịch" hoặc thất thường: `--temperature 0.7` (ổn định hơn, ít biểu cảm hơn; mặc định của model là 0.9).
 
+### Nghe lại lần hai bằng Whisper lớn (`--review`, bật sẵn trong notebook: `REVIEW = True`)
+
+Bộ kiểm tra trong lúc tạo giọng dùng Whisper nhỏ và nới tay để không tạo lại câu chỉ vì Whisper viết tên riêng
+bằng chữ Hán khác. Vì vậy nó có thể bỏ sót một từ đọc sai, thậm chí một câu bị nuốt mất (truyện đầu tiên:
+「生意気なこと言うな。」 bị bỏ qua). `--review` nghe lại **mọi câu** bằng Whisper large-v3-turbo, so sánh theo
+cách đọc (kana, đã áp dụng từ điển của bạn), rồi tạo **4 bản đọc khác** cho các câu đáng ngờ và giữ bản Whisper
+nghe rõ nhất. Báo cáo `truyen.audiblez/review.txt` liệt kê phần còn lại:
+
+- từ đọc sai thật → thêm một dòng vào từ điển rồi chạy lại (chỉ câu đó được tạo lại);
+- Whisper viết tên riêng khác đi (高円寺 → 公園寺, 源蔵 → 玄蔵): bỏ qua, giọng đọc đã đúng nhờ từ điển.
+
+Một câu chỉ được thử lại một lần (ghi trong `review.json`); chạy lại lệnh chỉ nghe lại những câu đã thay đổi.
+Trên GPU mất vài phút; trên CPU khoảng bằng độ dài audio.
+
+### Phụ đề, thẻ chương, màn hình kết thúc, âm thanh nền
+
+- **Phụ đề** `truyen.srt` được tạo cạnh video: đúng chữ gốc (chữ Hán, không phải kana đưa cho giọng đọc), từng
+  câu, khớp với chỗ ngắt hơi. Tải lên ở *YouTube Studio → Phụ đề → Thêm ngôn ngữ (Tiếng Nhật) → Tải tệp lên → Có
+  thời gian*. Phụ đề chuẩn giúp người xem và giúp YouTube hiểu nội dung (tìm kiếm).
+- `--chapter-cards` (`CHAPTER_CARDS = True`): tên chương hiện ở cuối khung hình trong lúc đọc chương đó.
+- Video kết thúc bằng 10 giây ảnh bìa làm mờ để gắn *Màn hình kết thúc* của YouTube (video tiếp theo, nút đăng ký);
+  `--end-screen 0` để bỏ.
+- `--ambience bien.flac` (`AMBIENCE = ...`): một bản thu (sóng biển, mưa, ve sầu…) lặp nhỏ bên dưới giọng đọc,
+  vào/ra từ từ. Mặc định `--ambience-level -26` (rất nhẹ; -20 là nghe rõ). Chỉ dùng bản thu bạn có quyền đăng
+  (CC0 hoặc tự thu).
+
 ## 7. Chạy trên máy có GPU NVIDIA riêng
 
 ```bash

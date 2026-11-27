@@ -98,6 +98,15 @@ def build_parser():
     g.add_argument('--asr-model', help='Whisper model (default: large-v3-turbo on GPU, small on CPU)')
     g.add_argument('--max-retries', type=int, default=3, help='Regenerations of a chunk that fails the checks')
     g.add_argument('--retry-failed', action='store_true', help='Regenerate the chunks listed in the QA report')
+    g.add_argument('--review', action='store_true',
+                   help='Before assembling, transcribe every chunk again with a stronger Whisper (large-v3-turbo), '
+                        'compare readings, and give the doubtful chunks alternative takes: the one Whisper hears '
+                        'best is kept. Report in <book>.audiblez/review.txt. Fast on a GPU; on CPU about the '
+                        'length of the audio')
+    g.add_argument('--review-model', help='Whisper model of --review (default large-v3-turbo)')
+    g.add_argument('--review-threshold', type=float, default=0.03,
+                   help='--review: reading error rate from which a chunk gets alternative takes (default 0.03)')
+    g.add_argument('--retakes', type=int, default=4, help='--review: alternative takes per doubtful chunk (default 4)')
 
     g = parser.add_argument_group('output')
     g.add_argument('--youtube', action='store_true', help='Also create an .mp4 video (cover image) and chapter '
@@ -110,6 +119,20 @@ def build_parser():
                    help='Pictures of the video: a folder of images (evenly spaced), or a text file with one line per '
                         'picture "image.jpg | text where it starts" (crossfades; checked with --dry-run)')
     g.add_argument('--keep-master', action='store_true', help='Keep the mastered WAV file(s)')
+    g.add_argument('--chapter-cards', action='store_true',
+                   help='Video: show the chapter title over the picture while the chapter is read')
+    g.add_argument('--end-screen', type=float, default=10.0, metavar='SECONDS',
+                   help='Video: seconds on a dimmed picture after the narration, for YouTube end-screen elements '
+                        '(default 10, 0 = none)')
+    g.add_argument('--ambience', metavar='AUDIO',
+                   help='A background recording (sea, rain, cicadas...) looped quietly under the narration, faded '
+                        'in and out. Use a recording you may publish (CC0 or your own)')
+    g.add_argument('--ambience-level', type=float, default=-26.0, metavar='LU',
+                   help='Loudness of --ambience relative to the narration (default -26: barely there; -20 is '
+                        'clearly audible)')
+    g.add_argument('--no-subtitles', action='store_true',
+                   help='Do not write the .srt subtitles (the text as written, timed to the narration) next to the '
+                        'video')
     return parser
 
 
@@ -129,12 +152,17 @@ def settings_from_args(args):
         repetition_penalty=args.repetition_penalty, seed=args.seed, batch_size=args.batch_size,
         backend=args.backend, gpus=args.gpus, time_limit=args.time_limit,
         max_chunk_chars=args.max_chunk_chars, qa=not args.no_qa, asr=args.asr, asr_model=args.asr_model,
-        max_retries=args.max_retries, retry_failed=args.retry_failed, normalize=not args.no_normalize,
+        max_retries=args.max_retries, retry_failed=args.retry_failed,
+        review=args.review, review_model=args.review_model, review_threshold=args.review_threshold,
+        retakes=args.retakes, normalize=not args.no_normalize,
         lexicon=args.lexicon, keep_stress=args.keep_stress_marks, stress=args.stress,
         announce_title=not args.no_title,
         pause_scale=args.pause_scale, room_tone=not args.no_room_tone, formats=formats, loudness=args.loudness,
         episode_hours=args.episode_hours,
-        cover=args.cover, slides=args.slides, keep_master=args.keep_master, dry_run=args.dry_run,
+        cover=args.cover, slides=args.slides, keep_master=args.keep_master, subtitles=not args.no_subtitles,
+        chapter_cards=args.chapter_cards, end_screen=max(0.0, args.end_screen), ambience=args.ambience,
+        ambience_level=args.ambience_level,
+        dry_run=args.dry_run,
         chapters=args.chapters)
 
 

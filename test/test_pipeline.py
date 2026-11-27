@@ -47,6 +47,12 @@ class FakeEngine:
         return out
 
 
+def core_srt_seconds(stamp):
+    h, m, rest = stamp.split(':')
+    s, ms = rest.split(',')
+    return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
+
+
 def make_epub(path):
     book = epub.EpubBook()
     book.set_identifier('test-ru-1')
@@ -127,6 +133,17 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(info['chapters'][0]['tags']['title'], 'Глава I')
         script = (out / 'Тестовая.повесть.audiblez' / 'script.txt').read_text(encoding='utf-8')
         self.assertIn('Глава вторая.', script)
+        # subtitles of each video: the text as written (digits), in the episode's own timeline
+        srt = [p for p in res2['files'] if p.name.endswith('_part01.srt')][0]
+        lines = srt.read_text(encoding='utf-8').splitlines()
+        self.assertIn('В 1812 году он ещё не знал, что будет дальше.', lines)
+        self.assertNotIn('тысяча восемьсот', srt.read_text(encoding='utf-8'))
+        stamps = [l for l in lines if ' --> ' in l]
+        starts = [core_srt_seconds(l.split(' --> ')[0]) for l in stamps]
+        self.assertEqual(starts, sorted(starts))
+        duration = float(subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0',
+                                         str(srt.with_suffix('.mp4'))], capture_output=True, text=True).stdout)
+        self.assertLess(core_srt_seconds(stamps[-1].split(' --> ')[1]), duration + 0.5)
 
     def test_single_file_book_named_index_is_kept(self):
         from types import SimpleNamespace

@@ -201,6 +201,48 @@ class ExportTest(unittest.TestCase):
             yt = (d / 'Книга.v2_part01_youtube.txt').read_text(encoding='utf-8')
             self.assertIn('00:00 Глава 1', yt)
 
+    def test_video_with_chapter_cards_end_screen_and_ambience(self):
+        """Chapter titles over the picture, a dimmed end card after the narration, a quiet looped ambience."""
+        def pixel(mp4, t, x, y):
+            raw = subprocess.run(['ffmpeg', '-loglevel', 'error', '-ss', str(t), '-i', str(mp4), '-frames:v', '1',
+                                  '-vf', f'crop=2:2:{x}:{y},format=rgb24', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
+                                 capture_output=True, check=True).stdout
+            return tuple(raw[:3])
+
+        def level(wav, a, b):
+            data, sr = sf.read(str(wav))
+            seg = data[int(a * sr):int(b * sr)]
+            return 20 * np.log10(np.sqrt(np.mean(seg ** 2)) + 1e-12)
+
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            chapters = []
+            for i in range(2):
+                wav = np.concatenate([sil(0.5), tone(9.0, 200 + 40 * i, amp=0.05), sil(3.0)])
+                path = d / f'ch{i}.wav'
+                sf.write(path, wav, SR, subtype='PCM_16')
+                chapters.append(ChapterAudio(f'第{i + 1}章', path, len(wav) / SR, []))
+            subprocess.run(['ffmpeg', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=0x6080a0:s=1920x1080',
+                            '-frames:v', '1', str(d / 'cover.png')], check=True)
+            amb = d / 'sea.wav'  # 3 s of noise, looped under 25 s of narration
+            sf.write(amb, (0.1 * np.random.default_rng(0).standard_normal(3 * SR)).astype(np.float32), SR)
+            opts = OutputOptions(formats=('mp4',), cover_path=d / 'cover.png', chapter_cards=True, video_tail=6.0,
+                                 ambience=amb, ambience_level=-20.0, keep_master=True)
+            export_audiobook(chapters, d / 'book', 'Book', '', None, opts, language='ja', log=lambda *a: None)
+            mp4 = d / 'book.mp4'
+            duration = float(subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of',
+                                             'csv=p=0', str(mp4)], capture_output=True, text=True).stdout)
+            self.assertAlmostEqual(duration, 25.0 + 6.0, delta=0.6)
+            top, bottom = pixel(mp4, 5, 960, 20), pixel(mp4, 5, 20, 1068)
+            self.assertTrue(all(abs(c - v) <= 6 for c, v in zip(top, (0x60, 0x80, 0xa0))), top)
+            self.assertTrue(all(c < v - 25 for c, v in zip(bottom, (0x60, 0x80, 0xa0))), bottom)  # card shade
+            end = pixel(mp4, duration - 1.0, 960, 20)
+            self.assertTrue(all(c < v - 15 for c, v in zip(end, (0x60, 0x80, 0xa0))), end)  # dimmed end card
+            master = d / 'book.master.wav'
+            pause, speech = level(master, 10.0, 12.0), level(master, 3.0, 8.0)
+            self.assertTrue(-60 < pause < speech - 12, (pause, speech))  # ambience audible in the pauses, quiet
+            self.assertLess(level(master, 0.0, 0.3), pause)  # faded in
+
 
 if __name__ == '__main__':
     unittest.main()
