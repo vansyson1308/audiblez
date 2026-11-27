@@ -165,6 +165,13 @@ class EndingCheckTest(unittest.TestCase):
             self.assertTrue(ending_is_missing(text, heard, 'ru'), heard)
         self.assertFalse(ending_is_missing('Он ушёл домой.', 'Он ушёл домой.', 'ru'))
         self.assertTrue(ending_is_missing('彼は帰ってこなかった。雨が降り始めた。', '彼は帰ってこなかった。', 'ja'))  # unchanged
+        # Hiroshima dialect: Whisper does not hear the long vowel of じゃけえ / けえ
+        line = '「触らんでええ。あんたはこれから、そんな汚れ仕事とはえんのない人間になるんじゃけえ」。'
+        for heard in ('あんたはこれからそんな汚れ仕事とは縁のない人間になるんじゃけ',
+                      '女が本ばっかり読んでも腹はふくれんけい', 'になるんじゃけー'):
+            text = line if 'じゃけ' in heard else '「女が本ばっかり読んでも、はらはふくれんけえ」。'
+            self.assertFalse(ending_is_missing(text, heard, 'ja'), heard)
+        self.assertTrue(ending_is_missing(line, 'あんたはこれから、そんな汚れ仕事とは', 'ja'))
 
 
 class WhisperCreditsTest(unittest.TestCase):

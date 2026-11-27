@@ -22,35 +22,13 @@ from pathlib import Path
 import numpy as np
 import soundfile
 
-from audiblez.audio import _normalize_for_cer, levenshtein, strip_whisper_hallucinations
+from audiblez.audio import _normalize_for_cer, canonical_kana, levenshtein, strip_whisper_hallucinations
 from audiblez.normalize import normalize_text
 
 DEFAULT_MODEL = 'large-v3-turbo'
 DEFAULT_THRESHOLD = 0.03  # reading error rate from which a chunk gets alternative takes
 DEFAULT_RETAKES = 4
 SEED_STEP = 7_777_777  # alternative takes use seeds the synthesis never uses
-
-
-_VOWEL_OF = {}
-for _vowel, _row in (('ア', 'アカサタナハマヤラワガザダバパャァ'), ('イ', 'イキシチニヒミリギジヂビピィ'),
-                     ('ウ', 'ウクスツヌフムユルグズヅブプュゥヴ'), ('エ', 'エケセテネヘメレゲゼデベペェ'),
-                     ('オ', 'オコソトノホモヨロヲゴゾドボポョォ')):
-    for _k in _row:
-        _VOWEL_OF[_k] = _vowel
-
-
-def canonical_kana(reading):
-    """
-    One spelling per pronunciation: a long-vowel mark as the vowel it lengthens (シネー = シネエ: Whisper writes the
-    しねえ of a dialogue as 死ねえ), ヅ/ヂ as ズ/ジ, ヲ as オ. Otherwise a single long vowel in a short chunk is
-    already a 3% "error" and costs alternative takes for nothing.
-    """
-    out = []
-    for ch in reading.translate(str.maketrans('ヅヂヲ', 'ズジオ')):
-        if ch == 'ー' and out and out[-1] in _VOWEL_OF:
-            ch = _VOWEL_OF[out[-1]]
-        out.append(ch)
-    return ''.join(out)
 
 
 def compare(text, heard, language, lexicon=None):
@@ -144,8 +122,25 @@ class Review:
         replaced = []
         if suspects and self.retakes and make_synth is not None:
             replaced = self._retake(suspects, make_synth)
+        self._clear_overruled_failures(items)
         self._save()
         return self._report(items, replaced)
+
+    def _clear_overruled_failures(self, items):
+        """
+        A chunk that failed only the transcription checks of the small Whisper (mismatch, missing ending) and that
+        the stronger one hears well is not a failure: it leaves the QA report. Other failures (voice, speed...) stay.
+        """
+        from audiblez.core import append_failed, load_failed
+        failed = load_failed(self.cache.cache_dir)
+        for _, t in items:
+            k = self.key(t)
+            entry = failed.get(k)
+            if not entry or self.state[k]['cer'] >= self.threshold:
+                continue
+            reasons = entry.get('reasons') or []
+            if reasons and all(r.startswith(('ASR mismatch', 'end of the sentence missing')) for r in reasons):
+                append_failed(self.cache.cache_dir / 'qa_failed.jsonl', dict(key=k, ok=True))
 
     def _retake(self, suspects, make_synth):
         from audiblez.core import free_accelerator_memory

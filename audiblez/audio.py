@@ -318,6 +318,42 @@ def _normalize_for_cer(text, lang='en'):
     return re.sub(r'\s+', ' ', text).strip()
 
 
+_VOWEL_OF = {}
+for _vowel, _row in (('ア', 'アカサタナハマヤラワガザダバパャァ'), ('イ', 'イキシチニヒミリギジヂビピィ'),
+                     ('ウ', 'ウクスツヌフムユルグズヅブプュゥヴ'), ('エ', 'エケセテネヘメレゲゼデベペェ'),
+                     ('オ', 'オコソトノホモヨロヲゴゾドボポョォ')):
+    for _k in _row:
+        _VOWEL_OF[_k] = _vowel
+
+
+def canonical_kana(reading):
+    """
+    One spelling per pronunciation of a katakana reading: a long-vowel mark as the vowel it lengthens (シネー =
+    シネエ: Whisper writes the しねえ of a dialogue as 死ねえ), ヅ/ヂ as ズ/ジ, ヲ as オ.
+    """
+    out = []
+    for ch in reading.translate(str.maketrans('ヅヂヲ', 'ズジオ')):
+        if ch == 'ー' and out and out[-1] in _VOWEL_OF:
+            ch = _VOWEL_OF[out[-1]]
+        out.append(ch)
+    return ''.join(out)
+
+
+def without_long_vowels(reading):
+    """
+    The reading with every lengthened vowel shortened (ケー, ケエ and ケイ -> ケ; トウ -> ト). Whisper does not hear
+    vowel length reliably: the dialect ending じゃけえ comes back as じゃけ or じゃけい, which made good takes of every
+    line of Hiroshima dialogue fail the "missing ending" check three times in a row.
+    """
+    out = []
+    for ch in canonical_kana(reading):
+        prev = _VOWEL_OF.get(out[-1]) if out else None
+        if prev and (ch == prev or (prev, ch) in (('エ', 'イ'), ('オ', 'ウ'))):
+            continue
+        out.append(ch)
+    return ''.join(out)
+
+
 def ending_is_missing(reference, hypothesis, lang='en'):
     """
     True if the last syllables of the text are not heard at the end of the transcript (clipped ending).
@@ -331,6 +367,8 @@ def ending_is_missing(reference, hypothesis, lang='en'):
     """
     lang = (lang or 'en')[:2]
     ref, hyp = _normalize_for_cer(reference, lang), _normalize_for_cer(hypothesis, lang)
+    if lang == 'ja':
+        ref, hyp = without_long_vowels(ref), without_long_vowels(hyp)
     n = 2 if lang in ('ja', 'zh', 'ko') else 3
     tail = ref[-n:]
     if not tail or len(ref) < 8 or tail in hyp[-(n + 4):]:

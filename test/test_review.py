@@ -130,6 +130,24 @@ class ReviewTest(unittest.TestCase):
         self.assertEqual((len(self.engine.calls), self.whisper.calls), (calls, heard))
         self.assertFalse((work / 'review_takes').exists())
 
+    def test_failures_overruled_by_the_stronger_whisper_leave_the_report(self):
+        from audiblez.core import append_failed, chunk_key, load_failed
+        from audiblez.review import Review
+        cache = core.CacheView(self.tmp / 'w', 'fake', 'fp')
+        cache.cache_dir.mkdir(parents=True)
+        texts = ['「腹はふくれんけえ」。', '別の文です。', '三つ目の文です。']
+        reasons = [['end of the sentence missing: heard "…ふくれんけい"'], ['speaker similarity 0.05'],
+                   ['ASR mismatch (CER 40%): heard "…"']]
+        for t, r in zip(texts, reasons):
+            append_failed(cache.cache_dir / 'qa_failed.jsonl', dict(key=chunk_key('fp', t), reasons=r))
+        review = Review(self.tmp / 'w', cache, 'ja')
+        review.state = {chunk_key('fp', t): dict(cer=c) for t, c in zip(texts, (0.0, 0.0, 0.2))}
+        review._clear_overruled_failures([('1', t) for t in texts])
+        left = load_failed(cache.cache_dir)
+        self.assertNotIn(chunk_key('fp', texts[0]), left)  # heard well by the stronger Whisper
+        self.assertIn(chunk_key('fp', texts[1]), left)  # not a transcription problem
+        self.assertIn(chunk_key('fp', texts[2]), left)  # still doubtful
+
 
 if __name__ == '__main__':
     unittest.main()
