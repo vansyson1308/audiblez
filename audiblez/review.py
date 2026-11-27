@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import soundfile
 
-from audiblez.audio import _normalize_for_cer, canonical_kana, levenshtein, strip_whisper_hallucinations
+from audiblez.audio import _normalize_for_cer, levenshtein, strip_whisper_hallucinations, without_long_vowels
 from audiblez.normalize import normalize_text
 
 DEFAULT_MODEL = 'large-v3-turbo'
@@ -38,8 +38,8 @@ def compare(text, heard, language, lexicon=None):
     except Exception:
         heard_text = heard
     ref, hyp = _normalize_for_cer(text, language), _normalize_for_cer(heard_text, language)
-    if language == 'ja':
-        ref, hyp = canonical_kana(ref), canonical_kana(hyp)
+    if language == 'ja':  # vowel length is what Whisper hears least reliably (じゃけえ -> じゃけ, ねえ -> ね)
+        ref, hyp = without_long_vowels(ref), without_long_vowels(hyp)
     diffs = [(tag, ref[a0:a1], hyp[b0:b1]) for tag, a0, a1, b0, b1 in
              difflib.SequenceMatcher(None, ref, hyp, autojunk=False).get_opcodes() if tag != 'equal']
     return levenshtein(ref, hyp) / max(1, len(ref)), diffs
@@ -103,6 +103,11 @@ class Review:
                 items.append((label, text))
         todo = [(label, t) for label, t in items
                 if self.state.get(self.key(t), {}).get('stamp') != _stamp(self.cache.path(t))]
+        for label, t in items:  # heard before: compared again (the dictionary may have changed), not transcribed
+            r = self.state.get(self.key(t))
+            if r and r.get('stamp') == _stamp(self.cache.path(t)) and 'heard' in r:
+                cer, r['diffs'] = compare(t, r['heard'], self.language, self.lexicon)
+                r['cer'] = round(cer, 4)
         t0 = time.time()
         if todo:
             self.log(f'\nReview: transcribing {len(todo)} chunks with Whisper {self.model}...')
