@@ -31,6 +31,28 @@ DEFAULT_RETAKES = 4
 SEED_STEP = 7_777_777  # alternative takes use seeds the synthesis never uses
 
 
+_VOWEL_OF = {}
+for _vowel, _row in (('ア', 'アカサタナハマヤラワガザダバパャァ'), ('イ', 'イキシチニヒミリギジヂビピィ'),
+                     ('ウ', 'ウクスツヌフムユルグズヅブプュゥヴ'), ('エ', 'エケセテネヘメレゲゼデベペェ'),
+                     ('オ', 'オコソトノホモヨロヲゴゾドボポョォ')):
+    for _k in _row:
+        _VOWEL_OF[_k] = _vowel
+
+
+def canonical_kana(reading):
+    """
+    One spelling per pronunciation: a long-vowel mark as the vowel it lengthens (シネー = シネエ: Whisper writes the
+    しねえ of a dialogue as 死ねえ), ヅ/ヂ as ズ/ジ, ヲ as オ. Otherwise a single long vowel in a short chunk is
+    already a 3% "error" and costs alternative takes for nothing.
+    """
+    out = []
+    for ch in reading.translate(str.maketrans('ヅヂヲ', 'ズジオ')):
+        if ch == 'ー' and out and out[-1] in _VOWEL_OF:
+            ch = _VOWEL_OF[out[-1]]
+        out.append(ch)
+    return ''.join(out)
+
+
 def compare(text, heard, language, lexicon=None):
     """(error rate, [(kind, expected, heard)]) between the text that was read and a transcript, as readings."""
     try:
@@ -38,6 +60,8 @@ def compare(text, heard, language, lexicon=None):
     except Exception:
         heard_text = heard
     ref, hyp = _normalize_for_cer(text, language), _normalize_for_cer(heard_text, language)
+    if language == 'ja':
+        ref, hyp = canonical_kana(ref), canonical_kana(hyp)
     diffs = [(tag, ref[a0:a1], hyp[b0:b1]) for tag, a0, a1, b0, b1 in
              difflib.SequenceMatcher(None, ref, hyp, autojunk=False).get_opcodes() if tag != 'equal']
     return levenshtein(ref, hyp) / max(1, len(ref)), diffs
