@@ -26,6 +26,7 @@ class ChapterAudio:
     path: Path
     duration: float  # seconds (source tempo)
     split_points: List[float] = field(default_factory=list)  # paragraph boundaries (seconds), candidates for splits
+    cues: list = field(default_factory=list)  # subtitles: (start, end, text) in seconds of this chapter
 
 
 @dataclass
@@ -53,6 +54,10 @@ class OutputOptions:
     cover_path: Optional[Path] = None
     keep_master: bool = False
     slides: Optional[list] = None  # [(image path, start seconds in the audiobook timeline)] for the video (--slides)
+    chapter_cards: bool = False  # video: the chapter title over the picture while each chapter is read
+    video_tail: float = 0.0  # video: seconds after the narration on a dimmed picture, for YouTube end screens
+    ambience: Optional[Path] = None  # a recording looped quietly under the narration (rain, sea, cicadas...)
+    ambience_level: float = -26.0  # its loudness relative to the narration (LU)
 
 
 def _with_ext(base: Path, ext):
@@ -273,10 +278,42 @@ def master_audio(in_wav, out_wav, opts: OutputOptions):
         gain += delta_i
         if delta_tp > 0.05:
             ceiling -= delta_tp + 0.1
-    _run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-i', in_wav, '-af', ','.join(chain(gain, ceiling)),
-          '-c:a', 'pcm_s24le', out_wav], capture=True)
-    return dict(input_i=input_i, output_i=out_i, output_tp=out_tp, gain=gain,
-                mode=f'linear gain {gain:+.1f} dB + peak limiter')
+    mode = f'linear gain {gain:+.1f} dB + peak limiter'
+    if opts.ambience:
+        mix_ambience(in_wav, out_wav, chain(gain, ceiling), opts)
+        out_i, out_tp = measure_loudness(out_wav)
+        mode += f', ambience {Path(opts.ambience).name} at {opts.ambience_level:+.0f} LU'
+    else:
+        _run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-i', in_wav, '-af',
+              ','.join(chain(gain, ceiling)), '-c:a', 'pcm_s24le', out_wav], capture=True)
+    return dict(input_i=input_i, output_i=out_i, output_tp=out_tp, gain=gain, mode=mode)
+
+
+AMBIENCE_FADE_IN, AMBIENCE_FADE_OUT = 4.0, 8.0
+
+
+def mix_ambience(in_wav, out_wav, speech_chain, opts: OutputOptions):
+    """
+    The mastered narration over a looped background recording, `opts.ambience_level` LU below the narration
+    target, faded in and out; a soft limiter keeps the true peak of the sum under the ceiling.
+    """
+    resample = f'aresample={opts.sample_rate}' + (':resampler=soxr' if ffmpeg_caps().soxr else '')
+    amb_i, _ = measure_loudness(opts.ambience, ['highpass=f=40', resample])
+    if not math.isfinite(amb_i):
+        raise SystemExit(f'--ambience: {opts.ambience} is silent')
+    amb_gain = opts.loudness + opts.ambience_level - amb_i
+    duration = sf.info(str(in_wav)).duration / opts.speed
+    fade_out = min(AMBIENCE_FADE_OUT, duration / 3)
+    limit = 10 ** ((opts.true_peak - 0.3) / 20)
+    graph = (f"[0:a]{','.join(speech_chain)}[s];"
+             f"[1:a]highpass=f=40,{resample},aformat=channel_layouts=mono,volume={amb_gain:.2f}dB,"
+             f"atrim=duration={duration:.3f},afade=t=in:d={min(AMBIENCE_FADE_IN, duration / 3):.2f},"
+             f"afade=t=out:st={max(0.0, duration - fade_out):.3f}:d={fade_out:.2f}[a];"
+             f"[s]aformat=channel_layouts=mono[sm];"
+             f"[sm][a]amix=inputs=2:normalize=0:duration=first,"
+             f"alimiter=limit={limit:.5f}:attack=2:release=80:level=false[out]")
+    _run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-i', in_wav, '-stream_loop', '-1', '-i',
+          opts.ambience, '-filter_complex', graph, '-map', '[out]', '-c:a', 'pcm_s24le', out_wav], capture=True)
 
 
 def prepare_cover(cover_bytes_or_path, work_dir) -> Optional[Path]:
@@ -395,13 +432,73 @@ def make_video_background(cover: Optional[Path], title, author, work_dir) -> Pat
     raise RuntimeError('Could not create the video background image')
 
 
+def _drawtext_font(text):
+    font = cjk_font_file(text)
+    return f"fontfile='{font.replace(chr(92), '/').replace(':', chr(92) + ':')}':" if font else ''
+
+
+def make_chapter_card(background: Path, title, index, work_dir) -> Path:
+    """The video picture with the chapter title at the bottom, over a soft shade (shown while it is read)."""
+    work_dir = Path(work_dir)
+    out = work_dir / f'chapter_card_{index:03d}.png'
+    (work_dir / f'chapter_card_{index:03d}.txt').write_text(title or '', encoding='utf-8')
+    ff = _drawtext_font(title)
+    graph = ("[0:v]scale=1920:1080,format=rgba[bg];"
+             "color=c=black:s=1920x320,format=rgba,geq=r=0:g=0:b=0:a='255*0.62*pow(Y/H,1.5)'[shade];"
+             "[bg][shade]overlay=0:H-320,"
+             "drawbox=x=(iw-90)/2:y=ih-168:w=90:h=2:color=white@0.55:t=fill,"
+             f"drawtext={ff}textfile=chapter_card_{index:03d}.txt:fontcolor=white:fontsize=50:x=(w-text_w)/2:"
+             "y=h-128-text_h/2:shadowcolor=black@0.55:shadowx=2:shadowy=2,format=rgb24")
+    try:
+        _run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-i', Path(background).resolve(),
+              '-filter_complex', graph, '-frames:v', '1', out.name], capture=True, cwd=work_dir)
+        return out
+    except RuntimeError:
+        return Path(background)  # no drawtext in this ffmpeg build: the plain picture
+
+
+def make_end_card(image: Path, work_dir) -> Path:
+    """The last picture blurred and dimmed: YouTube end-screen elements (videos, subscribe) stand out on it."""
+    out = Path(work_dir) / 'end_card.png'
+    try:
+        _run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-i', image, '-vf',
+              'scale=1920:1080,boxblur=18:2,eq=brightness=-0.20:saturation=0.85,format=rgb24', '-frames:v', '1', out],
+             capture=True)
+        return out
+    except RuntimeError:
+        return Path(image)
+
+
+def video_pictures(chapter_starts, background: Path, opts: OutputOptions, total, work_dir, slides=None):
+    """
+    [(image, start seconds)] of one video: its slides (--slides), else the background with the chapter titles
+    (--chapter-cards) or alone, then the end card after the narration (video_tail).
+    """
+    from audiblez.slides import CROSSFADE, MIN_GAP
+    if slides:
+        pictures = list(slides)
+    elif opts.chapter_cards and len(chapter_starts) > 1:
+        pictures = []
+        for k, (title, start) in enumerate(chapter_starts):
+            if pictures and (start - pictures[-1][1] < MIN_GAP or total - start < MIN_GAP):
+                continue
+            pictures.append((make_chapter_card(background, title, k, work_dir), 0.0 if not pictures else start))
+    else:
+        pictures = [(background, 0.0)]
+    if opts.video_tail > 0:
+        start = total + min(1.0, opts.video_tail / 4)
+        if start - pictures[-1][1] >= CROSSFADE + 0.5:
+            pictures.append((make_end_card(pictures[-1][0], work_dir), start))
+    return pictures
+
+
 def encode_mp4(master_wav, out_path, image: Path, meta_path, duration, opts: OutputOptions):
     caps = ffmpeg_caps()
     video = (['-c:v', 'libx264', '-preset', 'medium', '-tune', 'stillimage', '-crf', '18'] if caps.libx264
              else ['-c:v', 'mpeg4', '-q:v', '3'])
     cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-stats', '-y', '-loop', '1', '-framerate', '1',
            '-i', image, '-i', master_wav, '-i', meta_path, '-map', '0:v', '-map', '1:a', '-map_metadata', '2',
-           '-map_chapters', '2', *video, '-pix_fmt', 'yuv420p', '-r', '1', '-g', '30',
+           '-map_chapters', '2', *video, '-pix_fmt', 'yuv420p', '-r', '1', '-g', '30', '-af', 'apad',
            '-c:a', 'aac', '-b:a', opts.mp4_audio_bitrate, '-ac', '2', '-ar', str(opts.sample_rate),
            '-t', f'{duration:.3f}', '-movflags', '+faststart', out_path]
     _run(cmd)
@@ -442,7 +539,7 @@ def encode_slideshow(master_wav, out_path, slides, meta_path, duration, opts: Ou
             '-filter_complex', slideshow_graph([t for _, t in slides], duration),
             '-map', '[vout]', '-map', f'{n}:a', '-map_metadata', str(n + 1), '-map_chapters', str(n + 1),
             *video, '-pix_fmt', 'yuv420p', '-r', str(FPS), '-force_key_frames', 'expr:gte(t,n_forced*30)',
-            '-c:a', 'aac', '-b:a', opts.mp4_audio_bitrate, '-ac', '2', '-ar', str(opts.sample_rate),
+            '-af', 'apad', '-c:a', 'aac', '-b:a', opts.mp4_audio_bitrate, '-ac', '2', '-ar', str(opts.sample_rate),
             '-t', f'{duration:.3f}', '-movflags', '+faststart', out_path]
     _run(cmd)
 
@@ -497,16 +594,24 @@ def export_audiobook(chapters: List[ChapterAudio], out_base: Path, title, author
                 if opts.slides:
                     from audiblez.slides import slides_for_episode
                     ep_slides = slides_for_episode(opts.slides, [c.duration for c in chapters], pieces, opts.speed)
-                if ep_slides:
-                    shown = ', '.join(f'{format_timestamp(t, total >= 3600)} {Path(im).name}' for im, t in ep_slides)
-                    log(f'Encoding {path.name} (YouTube video, {len(ep_slides)} slides: {shown})...')
-                    encode_slideshow(master, path, ep_slides, meta_path, total, opts, tmp)
+                if background is None and not ep_slides:
+                    background = make_video_background(cover, title, author, tmp)
+                pictures = video_pictures([(name, a) for name, a, _ in meta_chapters], background, opts, total, tmp,
+                                          slides=ep_slides)
+                video_length = total + max(0.0, opts.video_tail)
+                if len(pictures) > 1:
+                    shown = ', '.join(f'{format_timestamp(t, total >= 3600)} {Path(im).name}' for im, t in pictures)
+                    log(f'Encoding {path.name} (YouTube video, {len(pictures)} pictures: {shown})...')
+                    encode_slideshow(master, path, pictures, meta_path, video_length, opts, tmp)
                 else:
-                    if background is None:
-                        background = make_video_background(cover, title, author, tmp)
                     log(f'Encoding {path.name} (YouTube video)...')
-                    encode_mp4(master, path, background, meta_path, total, opts)
+                    encode_mp4(master, path, pictures[0][0], meta_path, video_length, opts)
                 written.append(path)
+                if any(c.cues for c in chapters):
+                    from audiblez.subtitles import cues_for_episode, write_srt
+                    srt = _with_ext(base, '.srt')
+                    write_srt(srt, cues_for_episode([c.cues for c in chapters], pieces, opts.speed))
+                    written.append(srt)
                 text, warnings = youtube_chapters_text(meta_chapters, total)
                 yt = base.with_name(base.name + '_youtube.txt')
                 header = f'{ep_title}\n{author}\n\n' if author else f'{ep_title}\n\n'

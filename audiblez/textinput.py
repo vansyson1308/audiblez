@@ -263,6 +263,13 @@ def _first_heading(blocks):
     return next((b.text for b in blocks if b.kind == HEADING), None)
 
 
+def chapter_name(stem):
+    """Chapter title from a file name: the number that only sets the order is dropped ("03 冬晴れの朝" ->
+    "冬晴れの朝", "01_intro" -> "intro"); a name that is only a number ("1984") is kept."""
+    name = re.sub(r'^\d{1,3}(?:[\s._\-–—]+|(?=[^\w\s._\-–—]))(?=[^\d\s])', '', stem).strip()
+    return name or stem
+
+
 def _title_line(text, doc):
     """
     The first line of a plain-text story when it looks like its title: short, no sentence punctuation, followed by a
@@ -317,7 +324,7 @@ def read_text_book(path):
             blocks = plain_text_to_blocks(text, ruby_mode)
         if not blocks:
             continue
-        docs.append(TextDocument(name=f.name, blocks=blocks, toc_title=_first_heading(blocks) or f.stem))
+        docs.append(TextDocument(name=f.name, blocks=blocks, toc_title=_first_heading(blocks) or chapter_name(f.stem)))
     for i, d in enumerate(docs):
         d.chapter_index = i
     title = meta.get('title')
@@ -329,10 +336,10 @@ def read_text_book(path):
             docs[0].__post_init__()
     if not title and len(files) == 1 and docs and files[0].suffix.lower() not in ('.md', '.markdown'):
         title = _title_line(texts[files[0]], docs[0])
-        if title and docs[0].toc_title == files[0].stem:
+        if title and docs[0].toc_title == chapter_name(files[0].stem):
             docs[0].toc_title = title
     title_from_file = not title  # a file name is a fine metadata title, but it is not read aloud
-    if title and len(files) == 1 and docs and docs[0].toc_title == files[0].stem:
+    if title and len(files) == 1 and docs and docs[0].toc_title == chapter_name(files[0].stem):
         docs[0].toc_title = title  # chapter name of a story without headings (m4b, YouTube timestamps)
     title = title or (path.name if path.is_dir() else path.stem)
     cover = meta.get('cover')

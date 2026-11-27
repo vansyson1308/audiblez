@@ -134,6 +134,14 @@ class FormatsTest(unittest.TestCase):
         ja.write_text('星を継ぐ者\n\n彼は空を見上げた。\n', encoding='utf-8')
         self.assertEqual(core.load_source(ja).title, '星を継ぐ者')
 
+    def test_chapter_name_from_file_name(self):
+        from audiblez.textinput import chapter_name
+        self.assertEqual(chapter_name('1 高円寺の朝'), '高円寺の朝')  # the number only sets the order
+        self.assertEqual(chapter_name('03_Возвращение'), 'Возвращение')
+        self.assertEqual(chapter_name('2. Chapter two'), 'Chapter two')
+        for kept in ('1984', '2026-11-25_story', '1-2-3', '第1話'):
+            self.assertEqual(chapter_name(kept), kept)
+
     def test_markdown_dialogue_is_not_a_list(self):
         blocks = markdown_to_blocks('- Ты кто такая? - спросила она.\n\n- пункт списка\n\n- Item\n')
         self.assertEqual([b.text for b in blocks], ['— Ты кто такая? - спросила она.', 'пункт списка', 'Item'])

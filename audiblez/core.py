@@ -30,6 +30,7 @@ from audiblez import text as textmod
 from audiblez.audio import (QAConfig, RoomTone, analyze_chunk, clean_chunk, estimate_noise_floor, level_chunks,
                             silence)
 from audiblez.normalize import Lexicon, normalize_text
+from audiblez.subtitles import chunk_cues, source_spans
 from audiblez.text import BREAK, HEADING, Section, blocks_to_text, chunk_paragraph, html_to_blocks
 
 sample_rate = 24000
@@ -77,6 +78,10 @@ class Settings:
     asr_model: Optional[str] = None
     max_retries: int = 3
     retry_failed: bool = False
+    review: bool = False  # second opinion of a stronger Whisper on every chunk, alternative takes for doubtful ones
+    review_model: Optional[str] = None  # default large-v3-turbo
+    review_threshold: float = 0.03  # reading error rate from which a chunk gets alternative takes
+    retakes: int = 4
     # text
     normalize: bool = True
     lexicon: Optional[str] = None
@@ -93,6 +98,11 @@ class Settings:
     cover: Optional[str] = None
     slides: Optional[str] = None  # pictures of the video: a folder, or a text file "image | cue" (see slides.py)
     keep_master: bool = False
+    subtitles: bool = True  # .srt of the narration with the text as written, next to the video
+    chapter_cards: bool = False  # video: the chapter title over the picture while each chapter is read
+    end_screen: float = 10.0  # video: seconds on a dimmed picture after the narration (YouTube end screen), 0 = none
+    ambience: Optional[str] = None  # a recording looped quietly under the narration
+    ambience_level: float = -26.0  # LU relative to the narration
     dry_run: bool = False
     chapters: Optional[str] = None  # e.g. "1-3,5"
     time_limit: Optional[float] = None  # hours: stop synthesizing (cleanly, resumable) after this time
@@ -105,6 +115,7 @@ class Segment:
     pause_after: float
     kind: str = 'para'
     para_end: bool = True
+    display: Optional[str] = None  # the text as written (subtitles); None: same as `text`
 
 
 @dataclass
@@ -334,6 +345,7 @@ def plan_section(section: Section, language, max_chars, settings: Settings, lexi
         if not text or not re.search(r'\w', text):
             continue
         chunks = chunk_paragraph(text, language, max_chars)
+        displays = source_spans(b.text, text, [c.text for c in chunks])
         for ci, c in enumerate(chunks):
             last = ci == len(chunks) - 1
             if not last:
@@ -342,7 +354,7 @@ def plan_section(section: Section, language, max_chars, settings: Settings, lexi
                 pause = PAUSES['heading'] if is_heading else PAUSES['paragraph']
                 if nxt is not None and nxt.kind == HEADING and not is_heading:
                     pause = max(pause, PAUSES['before_heading'])
-            segments.append(Segment(c.text, pause * scale, b.kind, para_end=last))
+            segments.append(Segment(c.text, pause * scale, b.kind, para_end=last, display=displays[ci]))
     return segments
 
 
@@ -351,8 +363,9 @@ def intro_segments(title, creator, language, max_chars, settings, lexicon=None):
     for t in (title, creator):
         if t:
             text = normalize_text(t, language, is_heading=False, lexicon=lexicon, enabled=settings.normalize)
-            for c in chunk_paragraph(text, language, max_chars):
-                segs.append(Segment(c.text, PAUSES['title'] * settings.pause_scale, 'heading'))
+            chunks = chunk_paragraph(text, language, max_chars)
+            for c, shown in zip(chunks, source_spans(t, text, [c.text for c in chunks])):
+                segs.append(Segment(c.text, PAUSES['title'] * settings.pause_scale, 'heading', display=shown))
     if segs:
         segs[-1].pause_after = PAUSES['before_heading'] * settings.pause_scale
     return segs
@@ -1059,6 +1072,22 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
     if still:
         raise SystemExit(f'{sum(len(v) for v in still.values())} chunks could not be synthesized (see the errors '
                          f'above). Run the same command again to resume.')
+    if settings.review:
+        from audiblez.review import Review
+        engine = synth = verifier = None  # noqa: F841  (the narrator model leaves room for the large Whisper)
+        free_accelerator_memory()
+        review_settings = settings if not devices or len(devices) < 2 else dataclasses.replace(settings,
+                                                                                                device=devices[0])
+
+        def make_synth():
+            eng = create_engine(choice, review_settings)
+            return eng, Synthesizer(eng, work_dir, review_settings, stats, language=language, progress=False,
+                                    verifier=make_verifier(eng, language, review_settings))
+
+        Review(work_dir, cache, language, lexicon=lexicon, model=settings.review_model,
+               threshold=settings.review_threshold, retakes=settings.retakes, device=review_settings.device,
+               seed=settings.seed).run(all_texts, make_synth)
+        report = cache.report(all_texts)
 
     # 2. Assemble the chapters from the cache
     sr = 24000
@@ -1079,7 +1108,12 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
         chapter_timings.append(timings)
         path = chapters_dir / f'chapter_{c.index:03d}.wav'
         soundfile.write(str(path), wav, sr, subtype='PCM_16')
-        chapter_audio.append(ChapterAudio(c.title, path, len(wav) / sr, split_points))
+        cues = []
+        if settings.subtitles:
+            for seg, audio, (start, end) in zip(c.segments, audios, timings):
+                cues += chunk_cues(seg.display or seg.text.replace('\u0301', ''), seg.text, audio, sr, start, end,
+                                   language)
+        chapter_audio.append(ChapterAudio(c.title, path, len(wav) / sr, split_points, cues=cues))
         print(f'Chapter {c.index} ({c.title}): {len(wav) / sr / 60:.1f} min of audio')
         if post_event:
             post_event('CORE_CHAPTER_FINISHED', chapter_index=c.source_index)
@@ -1106,7 +1140,10 @@ def main(file_path, voice=None, pick_manually=False, speed=1.0, output_folder='.
             cover_path = slides[0].image  # the m4b artwork
         opts = OutputOptions(formats=tuple(settings.formats), loudness=settings.loudness, true_peak=settings.true_peak,
                              speed=1.0 if native_speed else settings.speed, episode_hours=settings.episode_hours,
-                             cover_path=cover_path, keep_master=settings.keep_master, slides=slide_times)
+                             cover_path=cover_path, keep_master=settings.keep_master, slides=slide_times,
+                             chapter_cards=settings.chapter_cards, video_tail=settings.end_screen,
+                             ambience=Path(settings.ambience).expanduser() if settings.ambience else None,
+                             ambience_level=settings.ambience_level)
         written = export_audiobook(chapter_audio, output_folder / stem, title, creator, cover_image, opts,
                                    language=language)
         print('\nCreated:')

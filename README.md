@@ -65,6 +65,15 @@ What happens between the text and the audio file matters as much as the voice:
   `--youtube` for a 1080p `.mp4` and the chapter timestamps of the description, `--episode-hours 2` for ~2-hour parts.
   `--slides slides.txt` changes the picture of the video at chosen paragraphs (`image.jpg | text where it starts`),
   with crossfades; cues are checked with `--dry-run`.
+- **Ready to upload**: an `.srt` next to each video with the text *as written* (高円寺, not the こうえんじ given to the
+  narrator; 1812, not the number in words), sentence by sentence and timed to the pauses of the narration (YouTube
+  Studio → Subtitles); `--chapter-cards` shows the chapter title over the picture while it is read; the video ends on
+  a dimmed picture for YouTube end-screen elements (`--end-screen 10`); `--ambience sea.flac` loops a recording
+  quietly under the narration (`--ambience-level -26` LU), faded in and out.
+- **Second opinion** (`--review`): before assembly every chunk is transcribed again with Whisper large-v3-turbo and
+  compared as readings (kana for Japanese, after your pronunciation dictionary); doubtful chunks get alternative takes
+  (`--retakes 4`) and the one Whisper hears best is kept. The report (`review.txt`) lists what is left: misread words
+  to fix with `--lexicon`, or names Whisper spells differently.
 
 ![Audiblez GUI on MacOSX](./imgs/mac.png)
 
