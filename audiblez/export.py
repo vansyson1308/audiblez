@@ -438,17 +438,20 @@ def _drawtext_font(text):
 
 
 def make_chapter_card(background: Path, title, index, work_dir) -> Path:
-    """The video picture with the chapter title at the bottom, over a soft shade (shown while it is read)."""
+    """
+    The video picture with the chapter title near the bottom, over a soft shade (shown while it is read). The title
+    sits above the band where YouTube draws captions (two lines), so that both stay readable.
+    """
     work_dir = Path(work_dir)
     out = work_dir / f'chapter_card_{index:03d}.png'
     (work_dir / f'chapter_card_{index:03d}.txt').write_text(title or '', encoding='utf-8')
     ff = _drawtext_font(title)
     graph = ("[0:v]scale=1920:1080,format=rgba[bg];"
-             "color=c=black:s=1920x320,format=rgba,geq=r=0:g=0:b=0:a='255*0.62*pow(Y/H,1.5)'[shade];"
-             "[bg][shade]overlay=0:H-320,"
-             "drawbox=x=(iw-90)/2:y=ih-168:w=90:h=2:color=white@0.55:t=fill,"
+             "color=c=black:s=1920x440,format=rgba,geq=r=0:g=0:b=0:a='255*0.66*pow(Y/H,1.4)'[shade];"
+             "[bg][shade]overlay=0:H-440,"
+             "drawbox=x=(iw-90)/2:y=ih-258:w=90:h=2:color=white@0.55:t=fill,"
              f"drawtext={ff}textfile=chapter_card_{index:03d}.txt:fontcolor=white:fontsize=50:x=(w-text_w)/2:"
-             "y=h-128-text_h/2:shadowcolor=black@0.55:shadowx=2:shadowy=2,format=rgb24")
+             "y=h-212-text_h/2:shadowcolor=black@0.6:shadowx=2:shadowy=2,format=rgb24")
     try:
         _run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-i', Path(background).resolve(),
               '-filter_complex', graph, '-frames:v', '1', out.name], capture=True, cwd=work_dir)

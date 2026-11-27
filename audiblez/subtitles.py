@@ -21,6 +21,7 @@ CJK_LANGS = ('ja', 'zh', 'ko')
 MAX_CUE_CHARS = {'ja': 28, 'zh': 24, 'ko': 34}  # one comfortable line of captions; other languages: 84
 MIN_CUE_SECONDS = 0.7
 LINGER = 0.4  # a cue stays on screen a little into the pause that follows it
+SHORT_SENTENCE = 7  # characters
 
 Cue = Tuple[float, float, str]
 
@@ -94,7 +95,17 @@ def cue_spans(text: str, lang: str, max_chars: Optional[int] = None) -> List[Tup
     lang = (lang or 'en')[:2].lower()
     max_chars = max_chars or MAX_CUE_CHARS.get(lang, 84)
     sentences = split_sentences(text, lang)
-    spans = _locate(text, sentences) or [(0, len(text))]
+    spans = []
+    for s0, s1 in _locate(text, sentences) or [(0, len(text))]:
+        # a very short sentence (「そうか。, "No.") is shown with the next one, or with its first clause when the
+        # whole would not fit on a line: alone, it would flash for a fraction of a second
+        if spans and len(text[spans[-1][0]:spans[-1][1]].strip()) < SHORT_SENTENCE and not text[spans[-1][1]:s0].strip():
+            first = _CLAUSE_RE.search(text, s0, s1)
+            first_end = first.end() if first and first.end() < s1 else s1
+            if first_end - spans[-1][0] <= max_chars:
+                spans[-1] = (spans[-1][0], s1)
+                continue
+        spans.append((s0, s1))
     out = []
     for s0, s1 in spans:
         if s1 - s0 <= max_chars:

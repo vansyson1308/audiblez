@@ -56,10 +56,23 @@ class CueTest(unittest.TestCase):
         text = '短い文だ。煙突から上がる細い煙、船腹を打つ波の線、ときには桟橋で竿を垂れる小さな少年の後ろ姿まで添えられていた。'
         spans = cue_spans(text, 'ja')
         parts = [text[a:b] for a, b in spans]
-        self.assertEqual(parts[0], '短い文だ。')
+        self.assertTrue(parts[0].startswith('短い文だ。煙突から'), parts)  # a short sentence is not shown alone
         self.assertEqual(''.join(parts), text)
         self.assertTrue(all(len(p) <= 34 for p in parts), parts)
-        self.assertGreaterEqual(len(parts), 3)
+        self.assertEqual(len(parts), 2)
+
+    def test_short_sentence_joins_the_next(self):
+        text = '「そうか。今日は、この待合所もとうとう壊すんじゃと。わしも最後に見届けておこう思うて出てきたんよ」'
+        parts = [text[a:b] for a, b in cue_spans(text, 'ja')]
+        self.assertEqual(parts[0], '「そうか。今日は、この待合所もとうとう壊すんじゃと。')
+        self.assertEqual(''.join(parts), text)
+        # too long together: the short sentence goes with the first clause of the next one
+        text = '「ええ。冴ちゃんが亡くなる少し前まで、あそこで働いとったけえね。'
+        self.assertEqual([text[a:b] for a, b in cue_spans(text, 'ja')],
+                         ['「ええ。冴ちゃんが亡くなる少し前まで、', 'あそこで働いとったけえね。'])
+        # no clause short enough: it stays alone
+        text = '「ええ。冴ちゃんが亡くなる少し前まであそこでずっと働いとったけえね。'
+        self.assertEqual([text[a:b] for a, b in cue_spans(text, 'ja')][0], '「ええ。')
 
     def test_tiny_tail_is_merged(self):
         text = 'Он долго молчал, глядя в окно на мокрую улицу и редких прохожих под зонтами, а потом сказал: да.'
