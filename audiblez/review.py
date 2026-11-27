@@ -45,6 +45,11 @@ def compare(text, heard, language, lexicon=None):
     return levenshtein(ref, hyp) / max(1, len(ref)), diffs
 
 
+def _percent(x):
+    """0.03 -> '3%', 0.025 -> '2.5%'."""
+    return f'{x:.1%}'.replace('.0%', '%')
+
+
 def _stamp(path):
     st = Path(path).stat()
     return [st.st_size, st.st_mtime_ns]
@@ -151,7 +156,7 @@ class Review:
         from audiblez.core import free_accelerator_memory
         takes_dir = self.work_dir / 'review_takes'
         takes_dir.mkdir(exist_ok=True)
-        self.log(f'Review: {len(suspects)} doubtful chunks (reading error rate >= {self.threshold:.0%}): '
+        self.log(f'Review: {len(suspects)} doubtful chunks (reading error rate >= {_percent(self.threshold)}): '
                  f'{self.retakes} alternative takes each...')
         engine, synth = make_synth()
         if not getattr(engine, 'stochastic', False):
@@ -226,6 +231,6 @@ class Review:
         path.write_text('\n'.join(lines), encoding='utf-8')
         doubtful = sum(c >= self.threshold for c in cers)
         self.log(f'Review: mean reading error rate {np.mean(cers) if cers else 0:.2%}; {len(replaced)} chunks replaced '
-                 f'by a better take; {doubtful} still at {self.threshold:.0%} or more. Details: {path}')
+                 f'by a better take; {doubtful} still at {_percent(self.threshold)} or more. Details: {path}')
         return dict(chunks=len(rows), mean_cer=float(np.mean(cers)) if cers else 0.0, replaced=replaced,
                     doubtful=doubtful, report=path)
