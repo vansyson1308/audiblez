@@ -95,11 +95,12 @@ class ReviewTest(unittest.TestCase):
         if japanese_reading('佐江') == japanese_reading('さえ'):  # with a Japanese reading dictionary installed
             cer, diffs = compare('姉のさえの居場所だった。', '姉の佐江の居場所だった', 'ja')  # same reading
             self.assertEqual(cer, 0.0)
+            self.assertEqual(compare('「はらはふくれんけえ」。', '腹は膨れんけい', 'ja')[0], 0.0)
         from audiblez.audio import canonical_kana
         self.assertEqual(canonical_kana('シネー'), canonical_kana('シネエ'))
         self.assertEqual(canonical_kana('コーゾー'), 'コオゾオ')
         self.assertEqual(canonical_kana('ツヅク'), 'ツズク')
-        self.assertEqual(compare('「はらはふくれんけえ」。', '腹は膨れんけい', 'ja')[0], 0.0)  # vowel length
+        self.assertEqual(compare('「ふくれんけえ」。', 'ふくれんけい', 'ja')[0], 0.0)  # vowel length
         cer, diffs = compare('生意気なこと言うな。お前みたいなのが。', 'お前みたいなのが', 'ja')
         self.assertGreater(cer, 0.3)
         self.assertEqual(diffs[0][0], 'delete')
